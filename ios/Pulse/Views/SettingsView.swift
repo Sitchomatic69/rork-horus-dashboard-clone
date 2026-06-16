@@ -9,7 +9,13 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @State private var viewModel = SettingsViewModel()
+    let apiKeyManager: ApiKeyManager
+    @State private var viewModel: SettingsViewModel
+
+    init(apiKeyManager: ApiKeyManager) {
+        self.apiKeyManager = apiKeyManager
+        self._viewModel = State(wrappedValue: SettingsViewModel(apiKeyManager: apiKeyManager))
+    }
 
     var body: some View {
         DashboardScreen {
@@ -235,6 +241,6 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView()
+    SettingsView(apiKeyManager: ApiKeyManager())
         .preferredColorScheme(.dark)
 }

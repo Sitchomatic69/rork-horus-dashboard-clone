@@ -8,6 +8,38 @@
 
 import SwiftUI
 
+// MARK: - Unified result card data
+
+/// Discriminated union wrapping either a breach result or a stealer log.
+/// Lets list views mix both result types in a single ForEach.
+enum ResultCardData: Identifiable {
+    case breach(BreachResult)
+    case stealer(StealerLogResult)
+
+    var id: String {
+        switch self {
+        case .breach(let r): return r.id
+        case .stealer(let s): return s.id
+        }
+    }
+}
+
+/// Renders either a BreachResultCard or StealerResultCard depending on payload.
+struct ResultCard: View {
+    let data: ResultCardData
+
+    var body: some View {
+        switch data {
+        case .breach(let result):
+            BreachResultCard(result: result)
+        case .stealer(let log):
+            StealerResultCard(log: log, onCopy: { _ in }, copiedField: nil)
+        }
+    }
+}
+
+// MARK: - Breach result card
+
 /// Displays a breach search result with key fields and a source badge.
 struct BreachResultCard: View {
     let result: BreachResult

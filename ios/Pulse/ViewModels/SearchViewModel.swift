@@ -4,7 +4,6 @@
 //
 //  Drives the Search panel: universal search bar, query execution,
 //  result pagination, and error handling for both OSINTDog and Horus.
-//  Uses the full API capabilities per the attached service specs.
 //
 
 import SwiftUI
@@ -26,15 +25,18 @@ final class SearchViewModel {
     var selectedType: SearchType = .email
     var horusField: HorusField = .all
 
+    private let apiKeyManager: ApiKeyManager
     private let dogRepo: OSINTDogRepository
     private let horusRepo: HorusRepository
     private var currentDogPage = 0
     private var horusCursor: String?
 
-    init(dogRepo: OSINTDogRepository = MockOSINTDogRepository(),
-         horusRepo: HorusRepository = MockHorusRepository()) {
-        self.dogRepo = dogRepo
-        self.horusRepo = horusRepo
+    init(apiKeyManager: ApiKeyManager,
+         dogRepo: OSINTDogRepository? = nil,
+         horusRepo: HorusRepository? = nil) {
+        self.apiKeyManager = apiKeyManager
+        self.dogRepo = dogRepo ?? LiveOSINTDogRepository(apiKeyManager: apiKeyManager)
+        self.horusRepo = horusRepo ?? LiveHorusRepository(apiKeyManager: apiKeyManager)
     }
 
     /// Runs a full search across both services for the current term and type.
@@ -56,7 +58,6 @@ final class SearchViewModel {
 
         isLoading = false
 
-        // Save to recent queries
         if !breachResults.isEmpty || !stealerResults.isEmpty {
             let query = SearchQuery(term: term, type: selectedType)
             recentQueries.insert(query, at: 0)
@@ -64,7 +65,6 @@ final class SearchViewModel {
         }
     }
 
-    /// Loads the next page of OSINTDog results.
     func loadMoreDog() async {
         guard hasMoreDog, !isLoading else { return }
         isLoading = true
@@ -73,7 +73,6 @@ final class SearchViewModel {
         isLoading = false
     }
 
-    /// Loads the next page of Horus results.
     func loadMoreHorus() async {
         guard hasMoreHorus, !isLoading else { return }
         isLoading = true

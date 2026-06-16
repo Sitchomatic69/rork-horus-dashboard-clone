@@ -2,136 +2,181 @@
 //  BrowseView.swift
 //  Pulse
 //
-//  The Browse panel: stealer log explorer with source filters,
-//  paginated log cards with metadata, and field-level copy support.
+//  The Browse panel: stealer log browsing with source filters,
+//  field filtering, date ranges, cursor pagination, and field-level copy.
+//  Uses the full Horus partner v1 API capabilities.
 //
 
 import SwiftUI
 
 struct BrowseView: View {
-    @State private var viewModel = BrowseViewModel()
+    let apiKeyManager: ApiKeyManager
+    @State private var viewModel: BrowseViewModel
+
+    init(apiKeyManager: ApiKeyManager) {
+        self.apiKeyManager = apiKeyManager
+        self._viewModel = State(wrappedValue: BrowseViewModel(apiKeyManager: apiKeyManager))
+    }
 
     var body: some View {
         DashboardScreen {
-            DashboardHeader(title: "Browse", subtitle: "Explore stealer log intelligence")
+            header
         } content: {
             filterBar
-
-            if let error = viewModel.error, !viewModel.isLoading {
-                errorBanner(error)
-            }
-
-            if viewModel.isLoading && viewModel.logs.isEmpty {
+            if viewModel.isLoading && viewModel.filteredLogs.isEmpty {
                 loadingState
-            } else if viewModel.filteredLogs.isEmpty && !viewModel.isLoading {
+            } else if let error = viewModel.error, viewModel.filteredLogs.isEmpty {
+                errorState(error)
+            } else if viewModel.filteredLogs.isEmpty {
                 emptyState
             } else {
-                logsSection
+                resultsList
             }
         }
         .task { await viewModel.load() }
     }
 
-    // MARK: - Filter bar
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Browse")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Recent stealer logs across monitored sources")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.top, 12)
+    }
+
+    // MARK: - Filters
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 ForEach(BrowseFilter.allCases) { filter in
                     FilterChip(
                         title: filter.rawValue,
                         isSelected: viewModel.filter == filter,
-                        action: {
-                            Haptics.select()
-                            viewModel.selectFilter(filter)
-                        }
+                        action: { viewModel.selectFilter(filter) }
                     )
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(HorusField.allCases) { field in
+                        FilterChip(
+                            title: field.rawValue,
+                            isSelected: viewModel.fieldFilter == field,
+                            action: { viewModel.selectField(field) }
+                        )
+                    }
                 }
             }
         }
-        .contentMargins(.horizontal, Theme.screenPadding, for: .scrollContent)
-        .padding(.horizontal, -Theme.screenPadding)
     }
 
-    // MARK: - Logs
+    // MARK: - Results
 
-    private var logsSection: some View {
+    private var resultsList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "\(viewModel.totalCount) logs found")
-
-            VStack(spacing: 10) {
-                ForEach(viewModel.filteredLogs) { log in
-                    StealerResultCard(
-                        log: log,
-                        onCopy: { viewModel.copyToClipboard($0) },
-                        copiedField: viewModel.copiedField
-                    )
+            HStack {
+                Text("\(viewModel.totalCount) logs")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textTertiary)
+                Spacer()
+                if viewModel.isLoading {
+                    ProgressView().scaleEffect(0.7).tint(Theme.cyan)
                 }
             }
 
-            if viewModel.hasMore {
-                Button {
-                    Task { await viewModel.loadMore() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if viewModel.isLoading {
-                            ProgressView().tint(Theme.accent)
+            LazyVStack(spacing: 10) {
+                ForEach(viewModel.filteredLogs) { log in
+                    ResultCard(data: .stealer(log))
+                        .contextMenu {
+                            if let username = log.username {
+                                Button { viewModel.copyToClipboard(username) } label: {
+                                    Label("Copy username", systemImage: "person")
+                                }
+                            }
+                            if let password = log.password {
+                                Button { viewModel.copyToClipboard(password) } label: {
+                                    Label("Copy password", systemImage: "key")
+                                }
+                            }
+                            if let ip = log.ip {
+                                Button { viewModel.copyToClipboard(ip) } label: {
+                                    Label("Copy IP", systemImage: "network")
+                                }
+                            }
+                            if let domain = log.domain {
+                                Button { viewModel.copyToClipboard(domain) } label: {
+                                    Label("Copy domain", systemImage: "globe")
+                                }
+                            }
                         }
-                        Text("Load more")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
-                    }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
+
+                if viewModel.hasMore {
+                    Button(action: { Task { await viewModel.loadMore() } }) {
+                        Text("Load more…")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.cyan)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                }
             }
         }
     }
 
     // MARK: - States
 
-    private func errorBanner(_ message: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.coral)
-            Text(message)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.coral)
-            Spacer()
+    private var loadingState: some View {
+        VStack(spacing: 16) {
+            Spacer().frame(height: 40)
+            ForEach(0..<5, id: \.self) { _ in
+                SkeletonBlock(height: 72)
+            }
         }
-        .padding(12)
-        .background(Theme.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func errorState(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 40)
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(Theme.negative)
+            Text(message)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Retry") { Task { await viewModel.load() } }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.cyan)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 40, weight: .light))
+        VStack(spacing: 12) {
+            Spacer().frame(height: 60)
+            Image(systemName: "tray")
+                .font(.system(size: 40))
                 .foregroundStyle(Theme.textTertiary)
-            Text("No stealer logs to browse")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textSecondary)
-            Text("Configure your Horus API key in Settings\nto start browsing intelligence data.")
-                .font(.system(size: 13))
+            Text("No logs found with current filters")
+                .font(.system(size: 14))
                 .foregroundStyle(Theme.textTertiary)
-                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
-    }
-
-    private var loadingState: some View {
-        VStack(spacing: 14) {
-            ForEach(0..<3, id: \.self) { _ in
-                SkeletonBlock(height: 180, cornerRadius: Theme.cornerMedium)
-            }
-        }
-        .padding(.top, 8)
+        .padding(.vertical, 40)
     }
 }
 
 #Preview {
-    BrowseView()
+    BrowseView(apiKeyManager: ApiKeyManager())
         .preferredColorScheme(.dark)
 }

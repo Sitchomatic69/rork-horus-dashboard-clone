@@ -116,10 +116,10 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw RepositoryError.parseError("Invalid status response")
         }
-        let healthy = json["healthy"] as? Bool ?? false
-        let services = json["services"] as? [String: Bool] ?? [:]
-        let message = json["message"] as? String
-        return OSINTDogStatus(healthy: healthy, services: services, message: message)
+        let status = json["status"] as? String ?? "unknown"
+        let version = json["version"] as? String
+        let services = json["services"] as? [String: [String]] ?? [:]
+        return OSINTDogStatus(status: status, version: version, services: services)
     }
 
     // MARK: - Helpers
@@ -228,10 +228,14 @@ final class MockOSINTDogRepository: OSINTDogRepository {
 
     func checkStatus() async throws -> OSINTDogStatus {
         try await Task.sleep(for: .milliseconds(300))
-        return OSINTDogStatus(healthy: true, services: [
-            "LeakCheck": true, "HackCheck": true, "Snusbase": true,
-            "BreachVIP": true, "IntelVault": true,
-        ], message: "All services operational")
+        return OSINTDogStatus(
+            status: "online",
+            version: "2.0.0",
+            services: [
+                "data_breach": ["LeakCheck v2", "HackCheck", "Snusbase", "BreachVIP", "IntelVault", "BreachBase"],
+                "social_media": ["SEON Email", "SEON Phone"],
+            ]
+        )
     }
 }
 

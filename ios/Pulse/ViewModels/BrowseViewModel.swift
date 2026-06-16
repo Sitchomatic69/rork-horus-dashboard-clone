@@ -4,7 +4,6 @@
 //
 //  Drives the Browse panel: stealer log browsing with source filters,
 //  field filtering, date ranges, cursor pagination, and field-level copy.
-//  Uses the full Horus partner v1 API capabilities.
 //
 
 import SwiftUI
@@ -21,11 +20,14 @@ final class BrowseViewModel {
     private(set) var totalCount = 0
     private(set) var copiedField: String?
 
+    private let apiKeyManager: ApiKeyManager
     private let horusRepo: HorusRepository
     private var cursor: String?
 
-    init(horusRepo: HorusRepository = MockHorusRepository()) {
-        self.horusRepo = horusRepo
+    init(apiKeyManager: ApiKeyManager,
+         horusRepo: HorusRepository? = nil) {
+        self.apiKeyManager = apiKeyManager
+        self.horusRepo = horusRepo ?? LiveHorusRepository(apiKeyManager: apiKeyManager)
     }
 
     func load() async {
@@ -78,7 +80,6 @@ final class BrowseViewModel {
         fieldFilter = newField
     }
 
-    /// Copies the given value to the clipboard and flashes a feedback indicator.
     func copyToClipboard(_ value: String) {
         UIPasteboard.general.string = value
         copiedField = value
@@ -89,7 +90,7 @@ final class BrowseViewModel {
         }
     }
 
-    /// Filter logs by selected source (browse is Horus-only; mock for OSINTDog).
+    /// Filter logs by selected source.
     var filteredLogs: [StealerLogResult] {
         switch filter {
         case .all: return logs

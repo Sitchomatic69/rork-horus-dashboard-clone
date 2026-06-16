@@ -9,7 +9,13 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @State private var viewModel = DashboardViewModel()
+    let apiKeyManager: ApiKeyManager
+    @State private var viewModel: DashboardViewModel
+
+    init(apiKeyManager: ApiKeyManager) {
+        self.apiKeyManager = apiKeyManager
+        self._viewModel = State(wrappedValue: DashboardViewModel(apiKeyManager: apiKeyManager))
+    }
 
     var body: some View {
         DashboardScreen {
@@ -184,6 +190,6 @@ struct DashboardView: View {
 }
 
 #Preview {
-    DashboardView()
+    DashboardView(apiKeyManager: ApiKeyManager())
         .preferredColorScheme(.dark)
 }

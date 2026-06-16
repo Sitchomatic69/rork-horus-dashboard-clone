@@ -30,7 +30,7 @@ final class SettingsViewModel {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }()
 
-    init(apiKeyManager: ApiKeyManager = ApiKeyManager()) {
+    init(apiKeyManager: ApiKeyManager) {
         self.apiKeyManager = apiKeyManager
     }
 

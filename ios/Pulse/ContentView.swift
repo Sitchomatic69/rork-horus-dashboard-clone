@@ -9,11 +9,13 @@ import SwiftUI
 
 /// App entry view — hosts the dashboard's root container.
 struct ContentView: View {
+    let apiKeyManager: ApiKeyManager
+
     var body: some View {
-        RootView()
+        RootView(apiKeyManager: apiKeyManager)
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(apiKeyManager: ApiKeyManager())
 }

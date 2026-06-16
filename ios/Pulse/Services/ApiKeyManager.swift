@@ -63,7 +63,8 @@ final class ApiKeyManager {
 
     // MARK: - Validation (per attached API specs)
 
-    /// Validates the OSINTDog key by hitting the /api/status health endpoint.
+    /// Validates the OSINTDog key by hitting GET /api/status.
+    /// The API returns `{"status": "online", ...}` on success.
     func validateOSINTDog() async {
         guard let key = osintdogKey, !key.isEmpty else {
             osintdogState = .invalid(reason: "No key set")
@@ -83,12 +84,12 @@ final class ApiKeyManager {
             }
             if http.statusCode == 200 {
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let healthy = json?["healthy"] as? Bool ?? false
-                if healthy {
-                    let plan = json?["plan"] as? String
-                    osintdogState = .valid(plan: plan)
+                let status = json?["status"] as? String
+                if status == "online" {
+                    let version = json?["version"] as? String
+                    osintdogState = .valid(plan: version)
                 } else {
-                    let msg = json?["message"] as? String ?? "Service unhealthy"
+                    let msg = status ?? "Service unavailable"
                     osintdogState = .invalid(reason: msg)
                 }
             } else if http.statusCode == 401 || http.statusCode == 403 {
@@ -103,7 +104,8 @@ final class ApiKeyManager {
         }
     }
 
-    /// Validates the Horus key by hitting /v1/search/stealer with a minimal query.
+    /// Validates the Horus key against GET /v1/search/stealer with a minimal query.
+    /// A 200 with `{"success": true}` means the key is valid.
     func validateHorus() async {
         guard let key = horusKey, !key.isEmpty else {
             horusState = .invalid(reason: "No key set")

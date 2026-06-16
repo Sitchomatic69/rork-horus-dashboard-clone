@@ -14,11 +14,11 @@ final class DashboardViewModel {
     private(set) var recentQueries: [SearchQuery] = []
     private(set) var isLoading = true
 
-    /// API health indicators.
+    /// API health indicators — read from the shared ApiKeyManager.
     var dogStatus: ApiValidationState { apiKeyManager.osintdogState }
     var horusStatus: ApiValidationState { apiKeyManager.horusState }
 
-    /// How many searches performed this session.
+    /// Session-level search counters.
     private(set) var searchesRun = 0
     private(set) var totalResultsFound = 0
     private(set) var lastSearchDate: Date?
@@ -27,12 +27,12 @@ final class DashboardViewModel {
     private let dogRepo: OSINTDogRepository
     private let horusRepo: HorusRepository
 
-    init(apiKeyManager: ApiKeyManager = ApiKeyManager(),
-         dogRepo: OSINTDogRepository = MockOSINTDogRepository(),
-         horusRepo: HorusRepository = MockHorusRepository()) {
+    init(apiKeyManager: ApiKeyManager,
+         dogRepo: OSINTDogRepository? = nil,
+         horusRepo: HorusRepository? = nil) {
         self.apiKeyManager = apiKeyManager
-        self.dogRepo = dogRepo
-        self.horusRepo = horusRepo
+        self.dogRepo = dogRepo ?? LiveOSINTDogRepository(apiKeyManager: apiKeyManager)
+        self.horusRepo = horusRepo ?? LiveHorusRepository(apiKeyManager: apiKeyManager)
     }
 
     var greeting: String {
@@ -44,7 +44,7 @@ final class DashboardViewModel {
         }
     }
 
-    /// Re-validates all configured API keys.
+    /// Re-validates all configured API keys via the shared manager.
     func load() async {
         isLoading = true
         await apiKeyManager.validateAll()
@@ -68,15 +68,6 @@ final class DashboardViewModel {
         case .valid(let plan): return plan.map { "Active — \($0)" } ?? "Active"
         case .invalid(let reason): return reason ?? "Invalid"
         case .error(let msg): return "Error: \(msg)"
-        }
-    }
-
-    func statusColor(for state: ApiValidationState) -> Color {
-        switch state {
-        case .valid: return Theme.positive
-        case .invalid, .error: return Theme.negative
-        case .validating: return Theme.accent
-        case .unknown: return Theme.textTertiary
         }
     }
 }

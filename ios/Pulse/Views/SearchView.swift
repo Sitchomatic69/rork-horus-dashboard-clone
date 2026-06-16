@@ -2,92 +2,155 @@
 //  SearchView.swift
 //  Pulse
 //
-//  The Search panel: universal search bar, type selector, and a
-//  two-section results feed (OSINTDog breaches + Horus stealer logs)
-//  with pagination.
+//  The Search panel: universal search bar with type selection,
+//  result tabs for breach data (OSINTDog) and stealer logs (Horus),
+//  pagination, and detailed result cards.
 //
 
 import SwiftUI
 
 struct SearchView: View {
-    @State private var viewModel = SearchViewModel()
+    let apiKeyManager: ApiKeyManager
+    @State private var viewModel: SearchViewModel
+
+    init(apiKeyManager: ApiKeyManager) {
+        self.apiKeyManager = apiKeyManager
+        self._viewModel = State(wrappedValue: SearchViewModel(apiKeyManager: apiKeyManager))
+    }
 
     var body: some View {
         DashboardScreen {
-            DashboardHeader(title: "Search", subtitle: "Query intelligence sources")
+            header
         } content: {
-            searchArea
-
-            if let error = viewModel.error, !viewModel.isLoading {
-                errorBanner(error)
-            }
-
+            searchBar
             if viewModel.isLoading && viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty {
                 loadingState
+            } else if let error = viewModel.error, viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty {
+                errorState(error)
+            } else if !viewModel.breachResults.isEmpty || !viewModel.stealerResults.isEmpty {
+                resultsSection
             } else {
-                if !viewModel.breachResults.isEmpty {
-                    osintdogSection
-                }
-                if !viewModel.stealerResults.isEmpty {
-                    horusSection
-                }
-                if viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty && !viewModel.isLoading {
-                    emptyState
+                emptyState
+            }
+        }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Search")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.textPrimary)
+            Text("Breach data & stealer logs across 15+ sources")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.top, 12)
+    }
+
+    // MARK: - Search bar
+
+    private var searchBar: some View {
+        VStack(spacing: 10) {
+            SearchBarView(
+                text: $viewModel.searchTerm,
+                selectedType: $viewModel.selectedType,
+                isSearching: viewModel.isLoading,
+                onSubmit: { Task { await viewModel.search() } }
+            )
+
+            HStack(spacing: 8) {
+                Text("Horus field:")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(HorusField.allCases) { field in
+                            FilterChip(
+                                title: field.rawValue,
+                                isSelected: viewModel.horusField == field,
+                                action: { viewModel.horusField = field }
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 
-    // MARK: - Search
+    // MARK: - Results
 
-    private var searchArea: some View {
-        SearchBarView(
-            text: $viewModel.searchTerm,
-            selectedType: $viewModel.selectedType,
-            isSearching: viewModel.isLoading,
-            onSubmit: { Task { await viewModel.search() } }
-        )
-    }
-
-    // MARK: - OSINTDog results
-
-    private var osintdogSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                SectionHeader(title: "OSINTDog · \(viewModel.totalDog) results")
-                Spacer()
-                SourceBadge(name: "OSINTDog", color: Theme.accent)
+    private var resultsSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if !viewModel.breachResults.isEmpty {
+                resultsGroup(
+                    title: "Breach Records — OSINTDog",
+                    count: viewModel.totalDog,
+                    tint: Theme.accent,
+                    results: viewModel.breachResults.map { breach in
+                        ResultCardData.breach(breach)
+                    },
+                    hasMore: viewModel.hasMoreDog,
+                    onLoadMore: { Task { await viewModel.loadMoreDog() } }
+                )
             }
-            VStack(spacing: 10) {
-                ForEach(viewModel.breachResults) { result in
-                    BreachResultCard(result: result)
-                }
+
+            if !viewModel.stealerResults.isEmpty {
+                resultsGroup(
+                    title: "Stealer Logs — Horus",
+                    count: viewModel.totalHorus,
+                    tint: Theme.cyan,
+                    results: viewModel.stealerResults.map { log in
+                        ResultCardData.stealer(log)
+                    },
+                    hasMore: viewModel.hasMoreHorus,
+                    onLoadMore: { Task { await viewModel.loadMoreHorus() } }
+                )
             }
-            if viewModel.hasMoreDog {
-                loadMoreButton("Load more OSINTDog…") {
-                    Task { await viewModel.loadMoreDog() }
+
+            if viewModel.isLoading {
+                HStack {
+                    Spacer()
+                    ProgressView().tint(Theme.accent)
+                    Spacer()
                 }
             }
         }
     }
 
-    // MARK: - Horus results
-
-    private var horusSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func resultsGroup(
+        title: String,
+        count: Int,
+        tint: Color,
+        results: [ResultCardData],
+        hasMore: Bool,
+        onLoadMore: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                SectionHeader(title: "Horus · \(viewModel.totalHorus) stealer logs")
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(tint)
                 Spacer()
-                SourceBadge(name: "Horus", color: Theme.cyan)
+                Text("\(count) total")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
             }
-            VStack(spacing: 10) {
-                ForEach(viewModel.stealerResults) { log in
-                    StealerResultCard(log: log, onCopy: { _ in }, copiedField: nil)
+
+            LazyVStack(spacing: 10) {
+                ForEach(results) { data in
+                    ResultCard(data: data)
                 }
-            }
-            if viewModel.hasMoreHorus {
-                loadMoreButton("Load more Horus…") {
-                    Task { await viewModel.loadMoreHorus() }
+
+                if hasMore {
+                    Button(action: onLoadMore) {
+                        Text("Load more…")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tint)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
                 }
             }
         }
@@ -95,60 +158,47 @@ struct SearchView: View {
 
     // MARK: - States
 
-    private func loadMoreButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if viewModel.isLoading {
-                    ProgressView().tint(Theme.accent)
-                }
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func errorBanner(_ message: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.coral)
-            Text(message)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Theme.coral)
-            Spacer()
-        }
-        .padding(12)
-        .background(Theme.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var emptyState: some View {
+    private var loadingState: some View {
         VStack(spacing: 16) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(Theme.textTertiary)
-            Text("Search for emails, usernames,\ndomains, or IPs")
-                .font(.system(size: 15, weight: .medium))
+            Spacer().frame(height: 40)
+            ForEach(0..<4, id: \.self) { _ in
+                SkeletonBlock(height: 80)
+            }
+        }
+    }
+
+    private func errorState(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 40)
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(Theme.negative)
+            Text(message)
+                .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .padding(.vertical, 40)
     }
 
-    private var loadingState: some View {
-        VStack(spacing: 14) {
-            ForEach(0..<3, id: \.self) { _ in
-                SkeletonBlock(height: 140, cornerRadius: Theme.cornerMedium)
-            }
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 60)
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 40))
+                .foregroundStyle(Theme.textTertiary)
+            Text("Enter a search term above\nto query breach databases")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
         }
-        .padding(.top, 8)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 }
 
 #Preview {
-    SearchView()
+    SearchView(apiKeyManager: ApiKeyManager())
         .preferredColorScheme(.dark)
 }

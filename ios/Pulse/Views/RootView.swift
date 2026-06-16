@@ -11,16 +11,21 @@ import SwiftUI
 /// Top-level container: a paged TabView with an overlaid custom tab bar.
 struct RootView: View {
     @State private var selection: DashboardTab = .search
+    let apiKeyManager: ApiKeyManager
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.background.ignoresSafeArea()
 
             TabView(selection: $selection) {
-                SearchView().tag(DashboardTab.search)
-                DashboardView().tag(DashboardTab.dashboard)
-                BrowseView().tag(DashboardTab.browse)
-                SettingsView().tag(DashboardTab.settings)
+                SearchView(apiKeyManager: apiKeyManager)
+                    .tag(DashboardTab.search)
+                DashboardView(apiKeyManager: apiKeyManager)
+                    .tag(DashboardTab.dashboard)
+                BrowseView(apiKeyManager: apiKeyManager)
+                    .tag(DashboardTab.browse)
+                SettingsView(apiKeyManager: apiKeyManager)
+                    .tag(DashboardTab.settings)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea(.keyboard)
@@ -32,5 +37,5 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView()
+    RootView(apiKeyManager: ApiKeyManager())
 }

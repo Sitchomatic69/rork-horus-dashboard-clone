@@ -147,11 +147,12 @@ enum OSINTDogSearchStatus: String, Hashable {
     case failed
 }
 
-/// API operational status response.
+/// API operational status response from GET /api/status.
+/// Returns `status: "online"` when all services are up.
 struct OSINTDogStatus: Hashable {
-    let healthy: Bool
-    let services: [String: Bool]    // service name → online
-    let message: String?
+    let status: String          // "online" or "degraded"
+    let version: String?
+    let services: [String: [String]]   // category → service names
 }
 
 // MARK: - Horus stealer log results
