@@ -2,7 +2,7 @@
 //  SettingsComponents.swift
 //  Pulse
 //
-//  Building blocks for the Settings panel: grouped containers and rows.
+//  Building blocks for the Settings panel: grouped containers, rows, and dividers.
 //
 
 import SwiftUI
@@ -39,36 +39,6 @@ struct RowDivider: View {
         Rectangle()
             .fill(Theme.stroke)
             .frame(height: 1)
-    }
-}
-
-/// A row with an icon, title, and a bound toggle.
-struct SettingsToggleRow: View {
-    let icon: String
-    let title: String
-    let tint: MetricAccent
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 14) {
-            iconChip
-            Text(title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(Theme.accent)
-        }
-        .padding(.vertical, 12)
-    }
-
-    private var iconChip: some View {
-        Image(systemName: icon)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(tint.color)
-            .frame(width: 34, height: 34)
-            .background(tint.color.opacity(0.15), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

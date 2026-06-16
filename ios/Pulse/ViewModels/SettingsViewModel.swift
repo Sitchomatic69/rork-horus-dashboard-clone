@@ -2,62 +2,82 @@
 //  SettingsViewModel.swift
 //  Pulse
 //
-//  State for the Settings panel. Toggle preferences are persisted to
-//  UserDefaults via bindings, so changes survive relaunches.
+//  Drives the Settings panel: API key management for both services,
+//  key validation, clear/remove actions, and app info.
 //
 
 import SwiftUI
 import Observation
 
-/// Drives the Settings panel: profile plus persisted preference toggles.
 @Observable
 final class SettingsViewModel {
-    private(set) var profile: UserProfile?
+    let apiKeyManager: ApiKeyManager
 
-    // Persisted preferences (loaded from UserDefaults in `init`).
-    var pushEnabled: Bool
-    var faceIDEnabled: Bool
-    var hapticsEnabled: Bool
-    var weeklyDigestEnabled: Bool
-    var compactCharts: Bool
-
-    let appVersion = "1.0.0"
-
-    @ObservationIgnored private let store: UserDefaults
-    private let repository: DashboardRepository
-
-    init(repository: DashboardRepository = MockDashboardRepository(), store: UserDefaults = .standard) {
-        self.repository = repository
-        self.store = store
-        self.pushEnabled = store.object(forKey: Keys.push) as? Bool ?? true
-        self.faceIDEnabled = store.object(forKey: Keys.faceID) as? Bool ?? false
-        self.hapticsEnabled = store.object(forKey: Keys.haptics) as? Bool ?? true
-        self.weeklyDigestEnabled = store.object(forKey: Keys.digest) as? Bool ?? true
-        self.compactCharts = store.object(forKey: Keys.compactCharts) as? Bool ?? false
+    var osintdogKey: String {
+        get { apiKeyManager.osintdogKey ?? "" }
+        set { apiKeyManager.osintdogKey = newValue.isEmpty ? nil : newValue }
     }
 
-    func load() async {
-        profile = await repository.loadProfile()
+    var horusKey: String {
+        get { apiKeyManager.horusKey ?? "" }
+        set { apiKeyManager.horusKey = newValue.isEmpty ? nil : newValue }
     }
 
-    /// Builds a Toggle binding that also persists the new value.
-    func binding(for keyPath: ReferenceWritableKeyPath<SettingsViewModel, Bool>, key: String) -> Binding<Bool> {
-        Binding(
-            get: { self[keyPath: keyPath] },
-            set: { newValue in
-                self[keyPath: keyPath] = newValue
-                self.store.set(newValue, forKey: key)
-                if self.hapticsEnabled { Haptics.soft() }
-            }
-        )
+    var osintdogState: ApiValidationState { apiKeyManager.osintdogState }
+    var horusState: ApiValidationState { apiKeyManager.horusState }
+
+    let appVersion: String = {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }()
+
+    init(apiKeyManager: ApiKeyManager = ApiKeyManager()) {
+        self.apiKeyManager = apiKeyManager
     }
 
-    /// UserDefaults keys for persisted preferences.
-    enum Keys {
-        static let push = "settings.push"
-        static let faceID = "settings.faceID"
-        static let haptics = "settings.haptics"
-        static let digest = "settings.digest"
-        static let compactCharts = "settings.compactCharts"
+    func validateOSINTDog() async {
+        await apiKeyManager.validateOSINTDog()
+    }
+
+    func validateHorus() async {
+        await apiKeyManager.validateHorus()
+    }
+
+    func clearOSINTDog() {
+        apiKeyManager.clearKey(for: .osintdog)
+    }
+
+    func clearHorus() {
+        apiKeyManager.clearKey(for: .horus)
+    }
+
+    // MARK: - Status helpers
+
+    func statusLabel(for state: ApiValidationState) -> String {
+        switch state {
+        case .unknown: return "Not checked"
+        case .validating: return "Validating..."
+        case .valid(let plan): return plan.map { "Active — \($0)" } ?? "Active"
+        case .invalid(let reason): return reason ?? "Invalid key"
+        case .error(let msg): return msg
+        }
+    }
+
+    func statusColor(for state: ApiValidationState) -> Color {
+        switch state {
+        case .valid: return Theme.positive
+        case .invalid, .error: return Theme.negative
+        case .validating: return Theme.accent
+        case .unknown: return Theme.textTertiary
+        }
+    }
+
+    func statusIcon(for state: ApiValidationState) -> String {
+        switch state {
+        case .valid: return "checkmark.circle.fill"
+        case .invalid: return "xmark.circle.fill"
+        case .error: return "exclamationmark.circle.fill"
+        case .validating: return "arrow.triangle.2.circlepath"
+        case .unknown: return "questionmark.circle"
+        }
     }
 }
