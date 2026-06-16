@@ -24,16 +24,39 @@ final class ApiKeyManager {
         self.session = session
     }
 
+    // MARK: - Environment fallbacks
+
+    /// Keys provisioned via public env variables (compiled into Config).
+    /// Used when the user hasn't stored their own key in the Keychain.
+    private var envOSINTDogKey: String? {
+        let value = Config.EXPO_PUBLIC_OSINTDOG_API_KEY
+        return value.isEmpty ? nil : value
+    }
+
+    private var envHorusKey: String? {
+        let value = Config.EXPO_PUBLIC_HORUS_API_KEY
+        return value.isEmpty ? nil : value
+    }
+
     // MARK: - Keychain access
 
+    /// Returns the user-stored key if present, otherwise the env-provisioned key.
     var osintdogKey: String? {
-        get { readKey(account: "osintdog") }
+        get { readKey(account: "osintdog") ?? envOSINTDogKey }
         set { writeKey(account: "osintdog", value: newValue) }
     }
 
     var horusKey: String? {
-        get { readKey(account: "horus") }
+        get { readKey(account: "horus") ?? envHorusKey }
         set { writeKey(account: "horus", value: newValue) }
+    }
+
+    /// Whether the active key comes from the environment rather than the Keychain.
+    func isUsingEnvKey(for source: DataSource) -> Bool {
+        switch source {
+        case .osintdog: return readKey(account: "osintdog") == nil && envOSINTDogKey != nil
+        case .horus: return readKey(account: "horus") == nil && envHorusKey != nil
+        }
     }
 
     func hasKey(for source: DataSource) -> Bool {

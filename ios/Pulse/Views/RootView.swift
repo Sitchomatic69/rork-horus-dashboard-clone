@@ -33,6 +33,11 @@ struct RootView: View {
             DashboardTabBar(selection: $selection)
         }
         .preferredColorScheme(.dark)
+        .task {
+            // Validate any stored or env-provisioned keys on launch so every
+            // panel reflects accurate API health from the start.
+            await apiKeyManager.validateAll()
+        }
     }
 }
 
