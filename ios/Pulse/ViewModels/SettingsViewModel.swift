@@ -26,6 +26,10 @@ final class SettingsViewModel {
     var osintdogState: ApiValidationState { apiKeyManager.osintdogState }
     var horusState: ApiValidationState { apiKeyManager.horusState }
 
+    /// Detailed error messages from the last validation attempt.
+    var lastOSINTDogError: String? { apiKeyManager.lastOSINTDogError }
+    var lastHorusError: String? { apiKeyManager.lastHorusError }
+
     let appVersion: String = {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }()

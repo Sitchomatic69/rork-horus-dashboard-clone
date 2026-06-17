@@ -34,9 +34,10 @@ struct RootView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            // Validate any stored or env-provisioned keys on launch so every
-            // panel reflects accurate API health from the start.
-            await apiKeyManager.validateAll()
+            // Fire-and-forget: validate keys without blocking the UI.
+            // The shared ApiKeyManager updates @Observable state that
+            // all panels react to as results come in.
+            Task { await apiKeyManager.validateAll() }
         }
     }
 }

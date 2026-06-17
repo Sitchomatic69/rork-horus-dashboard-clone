@@ -18,6 +18,10 @@ final class DashboardViewModel {
     var dogStatus: ApiValidationState { apiKeyManager.osintdogState }
     var horusStatus: ApiValidationState { apiKeyManager.horusState }
 
+    /// Detailed error messages from the last validation attempt.
+    var lastDogError: String? { apiKeyManager.lastOSINTDogError }
+    var lastHorusError: String? { apiKeyManager.lastHorusError }
+
     /// Session-level search counters.
     private(set) var searchesRun = 0
     private(set) var totalResultsFound = 0
