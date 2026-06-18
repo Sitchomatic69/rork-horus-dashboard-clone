@@ -77,6 +77,14 @@ struct DashboardView: View {
             Text(name)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
+
+            // Surface the last validation error when unhealthy
+            if let error = viewModel.errorFor(name: name) {
+                Text(error)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Theme.negative.opacity(0.8))
+                    .lineLimit(2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle(padding: 16, cornerRadius: Theme.cornerMedium)

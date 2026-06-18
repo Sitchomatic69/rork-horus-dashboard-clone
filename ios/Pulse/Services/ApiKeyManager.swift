@@ -155,6 +155,10 @@ final class ApiKeyManager {
                 return
             }
 
+            // Log the raw response to help diagnose issues
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
+            print("[Pulse] OSINTDog /api/status → HTTP \(http.statusCode): \(bodyPreview)")
+
             switch http.statusCode {
             case 200:
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -170,7 +174,7 @@ final class ApiKeyManager {
             case 401, 403:
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let detail = json?["message"] as? String ?? "Invalid API key"
-                osintdogState = .invalid(reason: "Key rejected (401)")
+                osintdogState = .invalid(reason: "Key rejected (HTTP \(http.statusCode))")
                 lastOSINTDogError = detail
             case 429:
                 osintdogState = .error("Rate limited — wait and retry")
@@ -179,8 +183,8 @@ final class ApiKeyManager {
                 osintdogState = .error("Server error \(code)")
                 lastOSINTDogError = "OSINTDog server error (HTTP \(code))"
             default:
-                osintdogState = .error("HTTP \(http.statusCode)")
-                lastOSINTDogError = "Unexpected HTTP \(http.statusCode)"
+                osintdogState = .error("Unexpected HTTP \(http.statusCode)")
+                lastOSINTDogError = "HTTP \(http.statusCode): \(bodyPreview)"
             }
         } catch let error as URLError where error.code == .timedOut {
             osintdogState = .error("Network timeout — try again")
@@ -191,10 +195,9 @@ final class ApiKeyManager {
         }
     }
 
-    /// Validates the Horus key against GET /v1/search/stealer with a
-    /// minimal "test" query. Matches LiveHorusRepository.checkHealth()
-    /// exactly — same endpoint, same 30s timeout, same "test" keyword,
-    /// same response shape handling.
+    /// Validates the Horus key against GET /v1/health — the dedicated
+    /// Horus health endpoint. Matches LiveHorusRepository.checkHealth()
+    /// exactly: same endpoint, same 30s timeout, same auth header.
     func validateHorus() async {
         guard let key = horusKey, !key.isEmpty else {
             if isEnvKeyMissing(for: .horus) {
@@ -210,12 +213,7 @@ final class ApiKeyManager {
         lastHorusError = nil
 
         do {
-            var components = URLComponents(string: "https://horus.st/api/v1/search/stealer")!
-            components.queryItems = [
-                URLQueryItem(name: "keyword", value: "test"),
-                URLQueryItem(name: "limit", value: "1"),
-            ]
-            var req = URLRequest(url: components.url!)
+            var req = URLRequest(url: URL(string: "https://horus.st/api/v1/health")!)
             req.setValue(key, forHTTPHeaderField: "X-Api-Key")
             req.setValue("Pulse/1.0", forHTTPHeaderField: "User-Agent")
             req.timeoutInterval = 30
@@ -227,22 +225,18 @@ final class ApiKeyManager {
                 return
             }
 
+            // Log the raw response to help diagnose issues
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
+            print("[Pulse] Horus /v1/health → HTTP \(http.statusCode): \(bodyPreview)")
+
             switch http.statusCode {
-            case 200:
-                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-                if json?["success"] as? Bool == true {
-                    horusState = .valid(plan: nil)
-                } else {
-                    let errorDict = json?["error"] as? [String: Any]
-                    let msg = errorDict?["message"] as? String ?? "API error"
-                    horusState = .invalid(reason: msg)
-                    lastHorusError = msg
-                }
+            case 200...299:
+                horusState = .valid(plan: nil)
             case 401, 403:
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let errorDict = json?["error"] as? [String: Any]
                 let msg = errorDict?["message"] as? String ?? "Invalid API key"
-                horusState = .invalid(reason: "Key rejected (401)")
+                horusState = .invalid(reason: "Key rejected (HTTP \(http.statusCode))")
                 lastHorusError = msg
             case 429:
                 horusState = .error("Rate limited — wait and retry")
@@ -251,8 +245,8 @@ final class ApiKeyManager {
                 horusState = .error("Server error \(code)")
                 lastHorusError = "Horus server error (HTTP \(code))"
             default:
-                horusState = .error("HTTP \(http.statusCode)")
-                lastHorusError = "Unexpected HTTP \(http.statusCode)"
+                horusState = .error("Unexpected HTTP \(http.statusCode)")
+                lastHorusError = "HTTP \(http.statusCode): \(bodyPreview)"
             }
         } catch let error as URLError where error.code == .timedOut {
             horusState = .error("Network timeout — try again")

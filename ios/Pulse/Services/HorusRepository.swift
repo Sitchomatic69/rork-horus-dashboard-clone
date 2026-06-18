@@ -113,17 +113,30 @@ final class LiveHorusRepository: HorusRepository {
 
     // MARK: - Health check
 
+    /// Uses the dedicated GET /v1/health endpoint — no stealer-search hack needed.
     func checkHealth() async throws -> Bool {
         guard let key = apiKeyManager.horusKey else {
             throw RepositoryError.missingKey
         }
-        let queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "keyword", value: "test"),
-            URLQueryItem(name: "limit", value: "1"),
-        ]
-        let (data, response) = try await makeHorusRequest(path: "/v1/search/stealer", queryItems: queryItems, key: key)
-        try validateHorusHTTP(response, data: data)
-        return true
+        var req = URLRequest(url: URL(string: "\(baseURL)/v1/health")!)
+        req.setValue(key, forHTTPHeaderField: "X-Api-Key")
+        req.setValue("Pulse/1.0", forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 30
+
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw RepositoryError.invalidResponse
+        }
+        switch http.statusCode {
+        case 200...299:
+            return true
+        case 401, 403:
+            throw RepositoryError.unauthorized
+        case 429:
+            throw RepositoryError.rateLimited
+        default:
+            throw RepositoryError.httpError(http.statusCode, "Health check failed (HTTP \(http.statusCode))")
+        }
     }
 
     // MARK: - Shared request helpers

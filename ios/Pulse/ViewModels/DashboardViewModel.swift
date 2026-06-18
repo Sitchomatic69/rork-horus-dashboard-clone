@@ -64,6 +64,22 @@ final class DashboardViewModel {
         if recentQueries.count > 5 { recentQueries = Array(recentQueries.prefix(5)) }
     }
 
+    /// Returns the last validation error for a given API, if the key is unhealthy.
+    func errorFor(name: String) -> String? {
+        switch name {
+        case "OSINTDog":
+            if case .invalid = dogStatus { return lastDogError }
+            if case .error = dogStatus { return lastDogError }
+            return nil
+        case "Horus":
+            if case .invalid = horusStatus { return lastHorusError }
+            if case .error = horusStatus { return lastHorusError }
+            return nil
+        default:
+            return nil
+        }
+    }
+
     /// Formatted string for API key status display.
     func statusLabel(for state: ApiValidationState) -> String {
         switch state {
