@@ -195,9 +195,10 @@ final class ApiKeyManager {
         }
     }
 
-    /// Validates the Horus key against GET /v1/health — the dedicated
-    /// Horus health endpoint. Matches LiveHorusRepository.checkHealth()
-    /// exactly: same endpoint, same 30s timeout, same auth header.
+    /// Validates the Horus key against GET /v1/search/stealer with a
+    /// minimal query — the same endpoint the app actually uses for searches.
+    /// Matches LiveHorusRepository.checkHealth() exactly: same endpoint,
+    /// same 30s timeout, same auth header, same response interpretation.
     func validateHorus() async {
         guard let key = horusKey, !key.isEmpty else {
             if isEnvKeyMissing(for: .horus) {
@@ -213,7 +214,12 @@ final class ApiKeyManager {
         lastHorusError = nil
 
         do {
-            var req = URLRequest(url: URL(string: "https://horus.st/api/v1/health")!)
+            var components = URLComponents(string: "https://horus.st/api/v1/search/stealer")!
+            components.queryItems = [
+                URLQueryItem(name: "keyword", value: "health_check"),
+                URLQueryItem(name: "limit", value: "1"),
+            ]
+            var req = URLRequest(url: components.url!)
             req.setValue(key, forHTTPHeaderField: "X-Api-Key")
             req.setValue("Pulse/1.0", forHTTPHeaderField: "User-Agent")
             req.timeoutInterval = 30
@@ -227,7 +233,7 @@ final class ApiKeyManager {
 
             // Log the raw response to help diagnose issues
             let bodyPreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
-            print("[Pulse] Horus /v1/health → HTTP \(http.statusCode): \(bodyPreview)")
+            print("[Pulse] Horus /v1/search/stealer (health) → HTTP \(http.statusCode): \(bodyPreview)")
 
             switch http.statusCode {
             case 200...299:

@@ -113,12 +113,20 @@ final class LiveHorusRepository: HorusRepository {
 
     // MARK: - Health check
 
-    /// Uses the dedicated GET /v1/health endpoint — no stealer-search hack needed.
+    /// Uses GET /v1/search/stealer with a minimal query as a lightweight
+    /// health check — the same endpoint the app actually uses. Matches
+    /// ApiKeyManager.validateHorus() exactly: same endpoint, same 30s
+    /// timeout, same auth header, same response treatment.
     func checkHealth() async throws -> Bool {
         guard let key = apiKeyManager.horusKey else {
             throw RepositoryError.missingKey
         }
-        var req = URLRequest(url: URL(string: "\(baseURL)/v1/health")!)
+        var components = URLComponents(string: "\(baseURL)/v1/search/stealer")!
+        components.queryItems = [
+            URLQueryItem(name: "keyword", value: "health_check"),
+            URLQueryItem(name: "limit", value: "1"),
+        ]
+        var req = URLRequest(url: components.url!)
         req.setValue(key, forHTTPHeaderField: "X-Api-Key")
         req.setValue("Pulse/1.0", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 30
