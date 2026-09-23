@@ -163,11 +163,18 @@ final class ApiKeyManager {
             case 200:
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let status = json?["status"] as? String
-                if status == "online" {
-                    let version = json?["version"] as? String
-                    osintdogState = .valid(plan: version)
+                let version = json?["version"] as? String
+                // HTTP 200 means the key authenticated successfully. "degraded"
+                // is OSINTDog's own service-health notice (some integrations
+                // down) — not a key problem. Treat it as valid but surface it.
+                if status == "online" || status == "degraded" {
+                    if status == "degraded" {
+                        osintdogState = .valid(plan: version.map { "\($0) · some services down" } ?? "some services down")
+                    } else {
+                        osintdogState = .valid(plan: version)
+                    }
                 } else {
-                    let msg = status ?? "Service unavailable"
+                    let msg = status ?? "unknown"
                     osintdogState = .invalid(reason: msg)
                     lastOSINTDogError = "Status endpoint returned \"\(msg)\""
                 }
