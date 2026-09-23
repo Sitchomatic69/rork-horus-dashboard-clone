@@ -42,17 +42,168 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         guard let key = apiKeyManager.osintdogKey else {
             throw RepositoryError.missingKey
         }
-        // Per docs: body is {"field": [{"<param>": "<term>"}]} — a flat array
+        // Per docs: body is {"field": [{"<param>": "<term>"}]} — an array
         // of single-key objects. No documented limit/page params.
         var req = makeAuthRequest(path: "/api/search", method: "POST", key: key)
         let body: [String: Any] = [
-            "field": [type.apiParam: term],
+            "field": [[type.apiParam: term]],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: req)
-        try validateHTTP(response, data: data)
+        logResponse("/api/search", data: data, response: response)
+        do {
+            try validateHTTP(response, data: data)
+        } catch let RepositoryError.httpError(403, msg) {
+            // 403 = term blacklisted on the universal endpoint. Blacklists
+            // are per-service, so fall back to querying each integrated
+            // service directly before giving up.
+            return try await perServiceSearch(term: term, type: type, universalMessage: msg)
+        }
         return try parseSearchResponse(data, page: page)
+    }
+
+    // MARK: - Per-service fallback
+
+    /// Fallback used when the universal /api/search endpoint blacklists a
+    /// term: queries each integrated service directly with its documented
+    /// body shape and merges whatever comes back. Services that also block
+    /// the term (403), are unavailable (404/5xx), or are rate limited are
+    /// skipped silently — whatever succeeds is returned.
+    private func perServiceSearch(
+        term: String,
+        type: SearchType,
+        universalMessage: String?
+    ) async throws -> OSINTDogSearchResponse {
+        guard let key = apiKeyManager.osintdogKey else {
+            throw RepositoryError.missingKey
+        }
+        let param = type.apiParam
+        let attempts: [(path: String, body: [String: Any], source: String)] = [
+            ("snusbase/search", [
+                "terms": [term],
+                "types": [param],
+                "wildcard": false,
+                "group_by": "db",
+            ], "Snusbase"),
+            ("leakcheck/v2", [
+                "term": term,
+                "search_type": param,
+                "limit": 100,
+                "offset": 0,
+            ], "LeakCheck v2"),
+            ("hackcheck", [
+                "term": term,
+                "search_type": param,
+            ], "HackCheck"),
+            ("breachbase", [
+                "term": term,
+                "search_type": param,
+            ], "BreachBase"),
+            ("breachvip/search", [
+                "term": term,
+                "wildcard": false,
+                "case_sensitive": false,
+            ], "BreachVIP"),
+            ("intelvault", [
+                "type": "breaches",
+                "field": [[param: term]],
+                "useWildcard": true,
+            ], "IntelVault"),
+        ]
+
+        var all: [BreachResult] = []
+        var unauthorizedCount = 0
+
+        for attempt in attempts {
+            var req = makeAuthRequest(path: "/api/\(attempt.path)", method: "POST", key: key)
+            req.httpBody = try JSONSerialization.data(withJSONObject: attempt.body)
+            do {
+                let (data, response) = try await session.data(for: req)
+                logResponse("/api/\(attempt.path)", data: data, response: response)
+                try validateHTTP(response, data: data)
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    continue
+                }
+                all.append(contentsOf: flattenServiceResults(json, fallbackSource: attempt.source))
+            } catch RepositoryError.httpError(403, _) {
+                continue   // blacklisted on this service too
+            } catch RepositoryError.rateLimited {
+                continue
+            } catch RepositoryError.unauthorized, RepositoryError.unauthorizedDetail(_) {
+                unauthorizedCount += 1
+                continue
+            } catch is RepositoryError {
+                continue   // 404 / 5xx / parse issues — service unusable, skip
+            }
+        }
+
+        if all.isEmpty {
+            if unauthorizedCount == attempts.count {
+                throw RepositoryError.unauthorized
+            }
+            throw RepositoryError.httpError(
+                403,
+                universalMessage ?? "Blocked by all OSINTDog search providers — try a different term"
+            )
+        }
+        return OSINTDogSearchResponse(results: all, total: all.count, page: 0, hasMore: false)
+    }
+
+    /// Flattens a per-service response into breach results. Handles both the
+    /// nested shape ({"results": [{"source": ..., "entries": [...]}]}) and a
+    /// flat entries array.
+    private func flattenServiceResults(_ json: [String: Any], fallbackSource: String) -> [BreachResult] {
+        var results: [BreachResult]
+        var counter = 0
+
+        func makeEntry(_ dict: [String: Any], source: String, index: Int) -> BreachResult {
+            let email = dict["email"] as? String
+            let username = dict["username"] as? String
+            let password = dict["password"] as? String
+            let domain = dict["domain"] as? String
+            let ip = dict["ip"] as? String
+            var fields = dict.compactMapValues { $0 as? String }
+            for key in ["email", "username", "password", "domain", "ip"] {
+                fields.removeValue(forKey: key)
+            }
+            return BreachResult(
+                id: "dog_\(index)_\(UUID().uuidString.prefix(6))",
+                source: source,
+                email: email, username: username, password: password,
+                domain: domain, ip: ip, fields: fields
+            )
+        }
+
+        results = []
+        if let sourceArray = json["results"] as? [[String: Any]] {
+            for group in sourceArray {
+                let source = group["source"] as? String ?? fallbackSource
+                if let entries = group["entries"] as? [[String: Any]] {
+                    for entry in entries {
+                        results.append(makeEntry(entry, source: source, index: counter))
+                        counter += 1
+                    }
+                } else if group["email"] != nil || group["username"] != nil || group["password"] != nil {
+                    results.append(makeEntry(group, source: source, index: counter))
+                    counter += 1
+                }
+            }
+        }
+        if results.isEmpty, let entries = json["entries"] as? [[String: Any]] {
+            for entry in entries {
+                results.append(makeEntry(entry, source: fallbackSource, index: counter))
+                counter += 1
+            }
+        }
+        return results
+    }
+
+    /// Diagnostic log: HTTP status + body preview for every search attempt.
+    private func logResponse(_ label: String, data: Data, response: URLResponse) {
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
+        print("[Pulse] OSINTDog \(label) → HTTP \(code): \(preview)")
     }
 
     // MARK: - Async search + polling
