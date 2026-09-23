@@ -173,7 +173,7 @@ final class ApiKeyManager {
                 }
             case 401, 403:
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let detail = json?["message"] as? String ?? "Invalid API key"
+                let detail = json?["detail"] as? String ?? json?["message"] as? String ?? "Invalid API key"
                 osintdogState = .invalid(reason: "Key rejected (HTTP \(http.statusCode))")
                 lastOSINTDogError = detail
             case 429:

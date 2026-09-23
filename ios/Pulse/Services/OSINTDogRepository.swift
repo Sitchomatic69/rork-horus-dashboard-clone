@@ -42,11 +42,11 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         guard let key = apiKeyManager.osintdogKey else {
             throw RepositoryError.missingKey
         }
+        // Per docs: body is {"field": [{"<param>": "<term>"}]} — a flat array
+        // of single-key objects. No documented limit/page params.
         var req = makeAuthRequest(path: "/api/search", method: "POST", key: key)
         let body: [String: Any] = [
-            "field": [[type.apiParam: term]],
-            "limit": pageSize,
-            "page": page,
+            "field": [type.apiParam: term],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -57,14 +57,17 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
 
     // MARK: - Async search + polling
 
+    /// Dump.cat asynchronous search, per docs:
+    /// 1. POST /api/dumpcat/search/init  {"term": "...", "sort": 2} → {"search_id": ...}
+    /// 2. POST /api/dumpcat/search/results {"search_id": ..., "limit", "offset"}
     func searchAsync(term: String, type: SearchType) async throws -> String {
         guard let key = apiKeyManager.osintdogKey else {
             throw RepositoryError.missingKey
         }
-        var req = makeAuthRequest(path: "/api/search/async", method: "POST", key: key)
+        var req = makeAuthRequest(path: "/api/dumpcat/search/init", method: "POST", key: key)
         let body: [String: Any] = [
-            "field": [[type.apiParam: term]],
-            "limit": pageSize,
+            "term": term,
+            "sort": 2,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -73,7 +76,7 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let searchId = json["search_id"] as? String ?? json["id"] as? String
         else {
-            throw RepositoryError.parseError("Missing search_id in async response")
+            throw RepositoryError.parseError("Missing search_id in Dump.cat init response")
         }
         return searchId
     }
@@ -82,25 +85,17 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         guard let key = apiKeyManager.osintdogKey else {
             throw RepositoryError.missingKey
         }
-        var req = makeAuthRequest(path: "/api/search/async/\(id)", method: "GET", key: key)
+        var req = makeAuthRequest(path: "/api/dumpcat/search/results", method: "POST", key: key)
+        let body: [String: Any] = [
+            "search_id": id,
+            "limit": pageSize,
+            "offset": page * pageSize,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
         let (data, response) = try await session.data(for: req)
         try validateHTTP(response, data: data)
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let status = json["status"] as? String
-        else {
-            throw RepositoryError.parseError("Missing status field")
-        }
-        switch status {
-        case "completed":
-            return try parseSearchResponse(data, page: page)
-        case "processing", "queued":
-            return OSINTDogSearchResponse(results: [], total: 0, page: page, hasMore: false)
-        case "failed":
-            throw RepositoryError.parseError("Async search failed")
-        default:
-            throw RepositoryError.parseError("Unknown status: \(status)")
-        }
+        return try parseSearchResponse(data, page: page)
     }
 
     // MARK: - Health check
@@ -134,54 +129,66 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         return req
     }
 
+    /// Per docs, error bodies use {"detail": "..."} and status codes mean:
+    /// 400 invalid format, 401 invalid/missing key, 403 blacklisted search term
+    /// (NOT auth), 429 rate limit, 500 server error.
     private func validateHTTP(_ response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else {
             throw RepositoryError.invalidResponse
         }
-        if http.statusCode == 401 || http.statusCode == 403 {
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let msg = json["message"] as? String {
-                throw RepositoryError.unauthorizedDetail(msg)
-            }
-            throw RepositoryError.unauthorized
-        }
-        if http.statusCode == 429 {
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let detail = json?["detail"] as? String ?? json?["message"] as? String
+        switch http.statusCode {
+        case 200...299:
+            return
+        case 401:
+            throw detail.map { RepositoryError.unauthorizedDetail($0) } ?? RepositoryError.unauthorized
+        case 403:
+            throw RepositoryError.httpError(403, detail ?? "Search term is blacklisted")
+        case 429:
             throw RepositoryError.rateLimited
-        }
-        guard (200...299).contains(http.statusCode) else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
-            throw RepositoryError.httpError(http.statusCode, message)
+        default:
+            throw RepositoryError.httpError(http.statusCode, detail)
         }
     }
 
+    /// Parses the documented nested response shape:
+    /// {"success": true, "total_entries": N, "results": [{"source": ..., "entries": [{...}]}]}
+    /// Entries are flattened into BreachResults tagged with their source name.
     private func parseSearchResponse(_ data: Data, page: Int) throws -> OSINTDogSearchResponse {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let success = json["success"] as? Bool, success
         else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
-            throw RepositoryError.parseError(message ?? "API returned unsuccessful response")
+            let errorJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let detail = errorJson?["detail"] as? String ?? errorJson?["message"] as? String
+            throw RepositoryError.parseError(detail ?? "API returned unsuccessful response")
         }
-        let resultArray = json["results"] as? [[String: Any]] ?? []
-        let total = json["total"] as? Int ?? resultArray.count
+        let total = json["total_entries"] as? Int ?? 0
+        let sourceArray = json["results"] as? [[String: Any]] ?? []
 
-        let results: [BreachResult] = resultArray.enumerated().compactMap { idx, dict in
-            let id = dict["id"] as? String ?? "dog_\(page)_\(idx)"
-            let source = dict["source"] as? String ?? "Unknown"
-            let email = dict["email"] as? String
-            let username = dict["username"] as? String
-            let password = dict["password"] as? String
-            let domain = dict["domain"] as? String
-            let ip = dict["ip"] as? String
-            let dateStr = dict["date"] as? String
-            let date = dateStr.flatMap { Self.dateFormatter.date(from: $0) }
-            var fields = dict.compactMapValues { $0 as? String }
-            for key in ["id", "source", "email", "username", "password", "domain", "ip", "date"] {
-                fields.removeValue(forKey: key)
+        var results: [BreachResult] = []
+        for (srcIdx, sourceDict) in sourceArray.enumerated() {
+            let source = sourceDict["source"] as? String ?? "Unknown"
+            let entries = sourceDict["entries"] as? [[String: Any]] ?? []
+            for (entryIdx, dict) in entries.enumerated() {
+                let id = dict["id"] as? String ?? "dog_\(page)_\(srcIdx)_\(entryIdx)"
+                let email = dict["email"] as? String
+                let username = dict["username"] as? String
+                let password = dict["password"] as? String
+                let domain = dict["domain"] as? String
+                let ip = dict["ip"] as? String
+                let dateStr = dict["date"] as? String
+                let date = dateStr.flatMap { Self.dateFormatter.date(from: $0) }
+                var fields = dict.compactMapValues { $0 as? String }
+                for key in ["id", "email", "username", "password", "domain", "ip", "date"] {
+                    fields.removeValue(forKey: key)
+                }
+                results.append(BreachResult(id: id, source: source, email: email, username: username,
+                                            password: password, domain: domain, ip: ip, date: date, fields: fields))
             }
-            return BreachResult(id: id, source: source, email: email, username: username,
-                                password: password, domain: domain, ip: ip, date: date, fields: fields)
         }
-        let hasMore = results.count == pageSize
+        // /api/search has no documented pagination — it returns all entries at once.
+        let hasMore = false
         return OSINTDogSearchResponse(results: results, total: total, page: page, hasMore: hasMore)
     }
 
