@@ -10,10 +10,10 @@
 import Foundation
 
 enum Config {
-    static let EXPO_PUBLIC_HORUS_API_KEY = ""
-    static let EXPO_PUBLIC_OSINTDOG_API_KEY = ""
+    nonisolated static let EXPO_PUBLIC_HORUS_API_KEY = ""
+    nonisolated static let EXPO_PUBLIC_OSINTDOG_API_KEY = ""
 
-    static let allValues: [String: String] = [
+    nonisolated static let allValues: [String: String] = [
         "EXPO_PUBLIC_HORUS_API_KEY": EXPO_PUBLIC_HORUS_API_KEY,
         "EXPO_PUBLIC_OSINTDOG_API_KEY": EXPO_PUBLIC_OSINTDOG_API_KEY,
     ]
