@@ -3,7 +3,8 @@
 //  Pulse
 //
 //  The Dashboard panel: greeting header, API health indicator cards,
-//  quick stats, and a recent search activity list.
+//  quick stats, and a recent search activity list for all three
+//  intelligence services.
 //
 
 import SwiftUI
@@ -61,6 +62,12 @@ struct DashboardView: View {
                 state: viewModel.horusStatus,
                 icon: "shield.checkered",
                 color: Theme.cyan
+            )
+            apiCard(
+                name: "DeHashed",
+                state: viewModel.dehashedStatus,
+                icon: "lock.rotation",
+                color: Theme.violet
             )
         }
     }

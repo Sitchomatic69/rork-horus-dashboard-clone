@@ -23,12 +23,19 @@ final class SettingsViewModel {
         set { apiKeyManager.horusKey = newValue.isEmpty ? nil : newValue }
     }
 
+    var dehashedKey: String {
+        get { apiKeyManager.dehashedKey ?? "" }
+        set { apiKeyManager.dehashedKey = newValue.isEmpty ? nil : newValue }
+    }
+
     var osintdogState: ApiValidationState { apiKeyManager.osintdogState }
     var horusState: ApiValidationState { apiKeyManager.horusState }
+    var dehashedState: ApiValidationState { apiKeyManager.dehashedState }
 
     /// Detailed error messages from the last validation attempt.
     var lastOSINTDogError: String? { apiKeyManager.lastOSINTDogError }
     var lastHorusError: String? { apiKeyManager.lastHorusError }
+    var lastDeHashedError: String? { apiKeyManager.lastDeHashedError }
 
     let appVersion: String = {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -46,12 +53,20 @@ final class SettingsViewModel {
         await apiKeyManager.validateHorus()
     }
 
+    func validateDeHashed() async {
+        await apiKeyManager.validateDeHashed()
+    }
+
     func clearOSINTDog() {
         apiKeyManager.clearKey(for: .osintdog)
     }
 
     func clearHorus() {
         apiKeyManager.clearKey(for: .horus)
+    }
+
+    func clearDeHashed() {
+        apiKeyManager.clearKey(for: .dehashed)
     }
 
     // MARK: - Status helpers

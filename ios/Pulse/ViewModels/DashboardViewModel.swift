@@ -17,10 +17,12 @@ final class DashboardViewModel {
     /// API health indicators — read from the shared ApiKeyManager.
     var dogStatus: ApiValidationState { apiKeyManager.osintdogState }
     var horusStatus: ApiValidationState { apiKeyManager.horusState }
+    var dehashedStatus: ApiValidationState { apiKeyManager.dehashedState }
 
     /// Detailed error messages from the last validation attempt.
     var lastDogError: String? { apiKeyManager.lastOSINTDogError }
     var lastHorusError: String? { apiKeyManager.lastHorusError }
+    var lastDeHashedError: String? { apiKeyManager.lastDeHashedError }
 
     /// Session-level search counters.
     private(set) var searchesRun = 0
@@ -56,9 +58,9 @@ final class DashboardViewModel {
     }
 
     /// Called after a successful search to update dashboard stats.
-    func recordSearch(query: String, dogCount: Int, horusCount: Int) {
+    func recordSearch(query: String, dogCount: Int, horusCount: Int, deHashedCount: Int = 0) {
         searchesRun += 1
-        totalResultsFound += dogCount + horusCount
+        totalResultsFound += dogCount + horusCount + deHashedCount
         lastSearchDate = Date()
         recentQueries.insert(SearchQuery(term: query, type: .email), at: 0)
         if recentQueries.count > 5 { recentQueries = Array(recentQueries.prefix(5)) }
@@ -74,6 +76,10 @@ final class DashboardViewModel {
         case "Horus":
             if case .invalid = horusStatus { return lastHorusError }
             if case .error = horusStatus { return lastHorusError }
+            return nil
+        case "DeHashed":
+            if case .invalid = dehashedStatus { return lastDeHashedError }
+            if case .error = dehashedStatus { return lastDeHashedError }
             return nil
         default:
             return nil

@@ -3,8 +3,8 @@
 //  Pulse
 //
 //  The Search panel: universal search bar with type selection,
-//  result tabs for breach data (OSINTDog) and stealer logs (Horus),
-//  pagination, and detailed result cards.
+//  result tabs for breach data (OSINTDog), leak records (DeHashed),
+//  stealer logs (Horus), pagination, and detailed result cards.
 //
 
 import SwiftUI
@@ -23,11 +23,11 @@ struct SearchView: View {
             header
         } content: {
             searchBar
-            if viewModel.isLoading && viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty {
+            if viewModel.isLoading && viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty && viewModel.dehashedResults.isEmpty {
                 loadingState
-            } else if let error = viewModel.error, viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty {
+            } else if let error = viewModel.error, viewModel.breachResults.isEmpty && viewModel.stealerResults.isEmpty && viewModel.dehashedResults.isEmpty {
                 errorState(error)
-            } else if !viewModel.breachResults.isEmpty || !viewModel.stealerResults.isEmpty {
+            } else if !viewModel.breachResults.isEmpty || !viewModel.stealerResults.isEmpty || !viewModel.dehashedResults.isEmpty {
                 resultsSection
             } else {
                 emptyState
@@ -106,6 +106,19 @@ struct SearchView: View {
                     },
                     hasMore: viewModel.hasMoreHorus,
                     onLoadMore: { Task { await viewModel.loadMoreHorus() } }
+                )
+            }
+
+            if !viewModel.dehashedResults.isEmpty {
+                resultsGroup(
+                    title: "Leak Records — DeHashed",
+                    count: viewModel.totalDeHashed,
+                    tint: Theme.violet,
+                    results: viewModel.dehashedResults.map { breach in
+                        ResultCardData.breach(breach)
+                    },
+                    hasMore: viewModel.hasMoreDehashed,
+                    onLoadMore: { Task { await viewModel.loadMoreDeHashed() } }
                 )
             }
 

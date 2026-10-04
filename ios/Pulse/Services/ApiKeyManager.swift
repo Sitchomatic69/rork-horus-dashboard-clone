@@ -16,11 +16,13 @@ import Security
 final class ApiKeyManager {
     private(set) var osintdogState: ApiValidationState = .unknown
     private(set) var horusState: ApiValidationState = .unknown
+    private(set) var dehashedState: ApiValidationState = .unknown
 
     /// Holds the most recent validation error per source so the UI
     /// can surface exactly what went wrong.
     private(set) var lastOSINTDogError: String?
     private(set) var lastHorusError: String?
+    private(set) var lastDeHashedError: String?
 
     private let service = "com.pulse.osint"
     private let session: URLSession
@@ -38,12 +40,15 @@ final class ApiKeyManager {
     private func logEnvProvisioning() {
         let dogRaw = Config.EXPO_PUBLIC_OSINTDOG_API_KEY
         let horusRaw = Config.EXPO_PUBLIC_HORUS_API_KEY
+        let dehashedRaw = Config.allValues["EXPO_PUBLIC_DEHASHED_API_KEY"] ?? ""
 
         let dogStatus = dogRaw.isEmpty ? "MISSING (empty string — check env injection)" : "present (\(dogRaw.prefix(8))...)"
         let horusStatus = horusRaw.isEmpty ? "MISSING (empty string — check env injection)" : "present (\(horusRaw.prefix(8))...)"
+        let dehashedStatus = dehashedRaw.isEmpty ? "MISSING (empty string — check env injection)" : "present (\(dehashedRaw.prefix(8))...)"
 
         print("[Pulse] OSINTDog env key: \(dogStatus)")
         print("[Pulse] Horus env key: \(horusStatus)")
+        print("[Pulse] DeHashed env key: \(dehashedStatus)")
     }
 
     /// Returns true when the environment key is empty — meaning the
@@ -52,6 +57,7 @@ final class ApiKeyManager {
         switch source {
         case .osintdog: return Config.EXPO_PUBLIC_OSINTDOG_API_KEY.isEmpty
         case .horus: return Config.EXPO_PUBLIC_HORUS_API_KEY.isEmpty
+        case .dehashed: return (Config.allValues["EXPO_PUBLIC_DEHASHED_API_KEY"] ?? "").isEmpty
         }
     }
 
@@ -69,6 +75,13 @@ final class ApiKeyManager {
         return value.isEmpty ? nil : value
     }
 
+    private var envDeHashedKey: String? {
+        // Dictionary lookup keeps this compiling even before Config regenerates
+        // with the new constant; once injected, the value flows through here.
+        let value = Config.allValues["EXPO_PUBLIC_DEHASHED_API_KEY"] ?? ""
+        return value.isEmpty ? nil : value
+    }
+
     // MARK: - Keychain access
 
     /// Returns the user-stored key if present, otherwise the env-provisioned key.
@@ -82,11 +95,17 @@ final class ApiKeyManager {
         set { writeKey(account: "horus", value: newValue) }
     }
 
+    var dehashedKey: String? {
+        get { readKey(account: "dehashed") ?? envDeHashedKey }
+        set { writeKey(account: "dehashed", value: newValue) }
+    }
+
     /// Whether the active key comes from the environment rather than the Keychain.
     func isUsingEnvKey(for source: DataSource) -> Bool {
         switch source {
         case .osintdog: return readKey(account: "osintdog") == nil && envOSINTDogKey != nil
         case .horus: return readKey(account: "horus") == nil && envHorusKey != nil
+        case .dehashed: return readKey(account: "dehashed") == nil && envDeHashedKey != nil
         }
     }
 
@@ -94,6 +113,7 @@ final class ApiKeyManager {
         switch source {
         case .osintdog: return osintdogKey != nil
         case .horus: return horusKey != nil
+        case .dehashed: return dehashedKey != nil
         }
     }
 
@@ -101,6 +121,7 @@ final class ApiKeyManager {
         switch source {
         case .osintdog: return osintdogKey
         case .horus: return horusKey
+        case .dehashed: return dehashedKey
         }
     }
 
@@ -114,6 +135,10 @@ final class ApiKeyManager {
             horusKey = nil
             horusState = .unknown
             lastHorusError = nil
+        case .dehashed:
+            dehashedKey = nil
+            dehashedState = .unknown
+            lastDeHashedError = nil
         }
     }
 
@@ -270,6 +295,79 @@ final class ApiKeyManager {
         }
     }
 
+    /// Validates the DeHashed key against POST /v2/search with a minimal
+    /// query — the same endpoint the app actually uses for searches.
+    /// Matches LiveDeHashedRepository: same endpoint, same 30s timeout,
+    /// same `Dehashed-Api-Key` header, same response interpretation.
+    func validateDeHashed() async {
+        guard let key = dehashedKey, !key.isEmpty else {
+            if isEnvKeyMissing(for: .dehashed) {
+                dehashedState = .invalid(reason: "Not provisioned — check build env")
+                lastDeHashedError = "DeHashed API key env variable is empty"
+            } else {
+                dehashedState = .invalid(reason: "No key set")
+                lastDeHashedError = "No DeHashed API key configured"
+            }
+            return
+        }
+        dehashedState = .validating
+        lastDeHashedError = nil
+
+        do {
+            var request = URLRequest(url: URL(string: "https://api.dehashed.com/v2/search")!)
+            request.httpMethod = "POST"
+            request.setValue(key, forHTTPHeaderField: "Dehashed-Api-Key")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Pulse/1.0", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 30
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "query": "email:test@example.com",
+                "page": 1,
+                "size": 1,
+            ])
+
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                dehashedState = .error("No response from server")
+                lastDeHashedError = "No HTTP response received"
+                return
+            }
+
+            // Log the raw response to help diagnose issues
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(200) ?? "<non-utf8>"
+            print("[Pulse] DeHashed /v2/search (health) → HTTP \(http.statusCode): \(bodyPreview)")
+
+            switch http.statusCode {
+            case 200...299:
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let balance = (json?["balance"] as? NSNumber)?.intValue
+                dehashedState = .valid(plan: balance.map { "balance \($0)" })
+            case 401, 403:
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let msg = json?["message"] as? String
+                    ?? (json?["error"] as? [String: Any])?["message"] as? String
+                    ?? "Invalid API key"
+                dehashedState = .invalid(reason: "Key rejected (HTTP \(http.statusCode))")
+                lastDeHashedError = msg
+            case 429:
+                dehashedState = .error("Rate limited — wait and retry")
+                lastDeHashedError = "Rate limited by DeHashed (HTTP 429)"
+            case let code where code >= 500:
+                dehashedState = .error("Server error \(code)")
+                lastDeHashedError = "DeHashed server error (HTTP \(code))"
+            default:
+                dehashedState = .error("Unexpected HTTP \(http.statusCode)")
+                lastDeHashedError = "HTTP \(http.statusCode): \(bodyPreview)"
+            }
+        } catch let error as URLError where error.code == .timedOut {
+            dehashedState = .error("Network timeout — try again")
+            lastDeHashedError = "Request timed out after 30s"
+        } catch {
+            dehashedState = .error(error.localizedDescription)
+            lastDeHashedError = error.localizedDescription
+        }
+    }
+
     /// Re-validates any key that is currently stored.
     func validateAll() async {
         await withTaskGroup(of: Void.self) { group in
@@ -278,6 +376,9 @@ final class ApiKeyManager {
             }
             if horusKey != nil {
                 group.addTask { await self.validateHorus() }
+            }
+            if dehashedKey != nil {
+                group.addTask { await self.validateDeHashed() }
             }
         }
     }

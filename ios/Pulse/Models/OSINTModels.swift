@@ -52,6 +52,7 @@ struct SearchQuery: Identifiable, Hashable {
 enum DataSource: String, Hashable {
     case osintdog = "OSINTDog"
     case horus = "Horus"
+    case dehashed = "DeHashed"
 }
 
 // MARK: - Horus field filter options

@@ -2,8 +2,8 @@
 //  SettingsView.swift
 //  Pulse
 //
-//  The Settings panel: API key management for OSINTDog and Horus,
-//  validation controls, clear/remove actions, and app info.
+//  The Settings panel: API key management for OSINTDog, Horus, and
+//  DeHashed, validation controls, clear/remove actions, and app info.
 //
 
 import SwiftUI
@@ -24,6 +24,7 @@ struct SettingsView: View {
             profileCard
             osintdogKeySection
             horusKeySection
+            dehashedKeySection
             appInfoSection
         }
     }
@@ -111,6 +112,37 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - DeHashed key
+
+    private var dehashedKeySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DEHASHED API")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textTertiary)
+                .tracking(0.5)
+                .padding(.leading, 4)
+
+            VStack(spacing: 0) {
+                apiKeyRow(
+                    icon: "lock.rotation",
+                    title: "DeHashed Key",
+                    tint: Theme.violet,
+                    text: $viewModel.dehashedKey,
+                    placeholder: "Paste DeHashed API key…",
+                    state: viewModel.dehashedState,
+                    onValidate: { Task { await viewModel.validateDeHashed() } },
+                    onClear: { viewModel.clearDeHashed() }
+                )
+            }
+            .padding(.horizontal, 16)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.cornerLarge, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cornerLarge, style: .continuous)
+                    .strokeBorder(Theme.stroke, lineWidth: 1)
+            )
+        }
+    }
+
     // MARK: - App info
 
     private var appInfoSection: some View {
@@ -148,6 +180,18 @@ struct SettingsView: View {
                     value: "horus.st",
                     action: {
                         if let url = URL(string: "https://horus.st/docs") {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                )
+                RowDivider()
+                SettingsLinkRow(
+                    icon: "doc.text.fill",
+                    title: "DeHashed API Docs",
+                    tint: .lime,
+                    value: "dehashed.com",
+                    action: {
+                        if let url = URL(string: "https://dehashed.com/api") {
                             UIApplication.shared.open(url)
                         }
                     }
