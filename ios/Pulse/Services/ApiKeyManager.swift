@@ -344,10 +344,13 @@ final class ApiKeyManager {
                 dehashedState = .valid(plan: balance.map { "balance \($0)" })
             case 401, 403:
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let msg = json?["message"] as? String
+                // DeHashed v2 returns a top-level "error" string, e.g.
+                // "You need a search subscription and API credits...".
+                let msg = (json?["error"] as? String)
+                    ?? json?["message"] as? String
                     ?? (json?["error"] as? [String: Any])?["message"] as? String
                     ?? "Invalid API key"
-                dehashedState = .invalid(reason: "Key rejected (HTTP \(http.statusCode))")
+                dehashedState = .invalid(reason: "Access denied (HTTP \(http.statusCode))")
                 lastDeHashedError = msg
             case 429:
                 dehashedState = .error("Rate limited — wait and retry")
