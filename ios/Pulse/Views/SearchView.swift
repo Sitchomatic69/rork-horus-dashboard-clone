@@ -188,12 +188,14 @@ struct SearchView: View {
         let url: URL
     }
 
-    /// Number of password-bearing credentials currently loaded.
+    /// Number of unique credentials currently loaded (matches what exports contain).
     private var loadedCredentialCount: Int {
-        PasswordExporter.collect(
-            breaches: viewModel.breachResults,
-            dehashed: viewModel.dehashedResults,
-            stealer: viewModel.stealerResults
+        PasswordExporter.deduplicated(
+            PasswordExporter.collect(
+                breaches: viewModel.breachResults,
+                dehashed: viewModel.dehashedResults,
+                stealer: viewModel.stealerResults
+            )
         ).count
     }
 

@@ -25,8 +25,8 @@ enum PasswordExporter {
 
     // MARK: - Collection
 
-    /// Collects every password-bearing entry from all result sources,
-    /// keeping duplicates so the exported list is complete.
+    /// Collects every password-bearing entry from all result sources.
+    /// Duplicates are kept here and removed at export time via `deduplicated`.
     static func collect(
         breaches: [BreachResult],
         dehashed: [BreachResult],
@@ -64,7 +64,9 @@ enum PasswordExporter {
     // MARK: - Formats
 
     /// CSV with one row per credential, header line first.
-    static func csv(from rows: [CredentialRow]) -> String {
+    /// Identical rows are exported once — duplicates removed.
+    static func csv(from allRows: [CredentialRow]) -> String {
+        let rows = deduplicated(allRows)
         var lines: [String] = ["source,identifier,username,password,domain,captured"]
         for row in rows {
             let date = row.date.map(fileStampFormatter.string(from:)) ?? ""
@@ -80,9 +82,26 @@ enum PasswordExporter {
         return lines.joined(separator: "\n")
     }
 
-    /// Plain-text list with every password on its own line, in result order.
-    static func passwordList(from rows: [CredentialRow]) -> String {
-        rows.map(\.password).joined(separator: "\n")
+    /// Plain-text list with each unique password on its own line,
+    /// in first-seen order.
+    static func passwordList(from allRows: [CredentialRow]) -> String {
+        deduplicated(allRows).map(\.password).joined(separator: "\n")
+    }
+
+    /// Removes duplicate credentials, keeping the first occurrence.
+    /// Two rows count as duplicates when source, identifier, username,
+    /// password, domain, and date all match.
+    static func deduplicated(_ rows: [CredentialRow]) -> [CredentialRow] {
+        var seen = Set<String>()
+        var unique: [CredentialRow] = []
+        unique.reserveCapacity(rows.count)
+        for row in rows {
+            let key = "\(row.source)|\(row.identifier)|\(row.username ?? "")|\(row.password)|\(row.domain ?? "")|\(row.date?.timeIntervalSince1970 ?? 0)"
+            if seen.insert(key).inserted {
+                unique.append(row)
+            }
+        }
+        return unique
     }
 
     /// Unique passwords, most frequent first — used for clipboard copying.
