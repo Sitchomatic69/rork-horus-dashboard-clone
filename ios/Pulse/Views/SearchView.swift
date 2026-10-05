@@ -15,6 +15,7 @@ struct SearchView: View {
     @State private var viewModel: SearchViewModel
     @State private var shareItem: ShareItem?
     @State private var copiedCount: Int?
+    @State private var selectedFormat: ExportFormat = .csv
 
     init(apiKeyManager: ApiKeyManager) {
         self.apiKeyManager = apiKeyManager
@@ -178,9 +179,31 @@ struct SearchView: View {
 
     // MARK: - Export
 
-    private enum ExportKind {
-        case csv
-        case passwordList
+    /// Output formats available in the export dropdown.
+    private enum ExportFormat: String, CaseIterable, Identifiable {
+        case csv = "CSV"
+        case txt = "TXT"
+        case json = "JSON"
+
+        var id: String { rawValue }
+
+        var fileExtension: String { rawValue.lowercased() }
+
+        var menuTitle: String {
+            switch self {
+            case .csv: return "Full credentials (.csv)"
+            case .txt: return "Complete password list (.txt)"
+            case .json: return "Structured credentials (.json)"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .csv: return "tablecells"
+            case .txt: return "doc.plaintext"
+            case .json: return "curlybraces.square"
+            }
+        }
     }
 
     private struct ShareItem: Identifiable {
@@ -222,35 +245,69 @@ struct SearchView: View {
 
             Spacer()
 
-            Menu {
-                Button { Task { await export(kind: .csv) } } label: {
-                    Label("Full credentials (.csv)", systemImage: "tablecells")
+            HStack(spacing: 8) {
+                // Format dropdown
+                Menu {
+                    ForEach(ExportFormat.allCases) { format in
+                        Button {
+                            Haptics.select()
+                            selectedFormat = format
+                        } label: {
+                            if selectedFormat == format {
+                                Label(format.menuTitle, systemImage: "checkmark")
+                            } else {
+                                Label(format.menuTitle, systemImage: format.icon)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(selectedFormat.rawValue)
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Theme.surfaceElevated))
+                    .overlay(Capsule().strokeBorder(Theme.strokeStrong))
                 }
-                Button { Task { await export(kind: .passwordList) } } label: {
-                    Label("Complete password list (.txt)", systemImage: "doc.plaintext")
+                .disabled(viewModel.isExporting || viewModel.isLoading)
+
+                // Export action — uses the selected format
+                Button {
+                    Task { await export(format: selectedFormat) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.up")
+                        Text("Export")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.background)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Theme.accent))
                 }
-                Divider()
+                .disabled(viewModel.isExporting || viewModel.isLoading)
+
+                // Copy shortcut
                 Button { copyPasswords() } label: {
-                    Label("Copy all passwords", systemImage: "doc.on.doc")
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Theme.surfaceElevated))
+                        .overlay(Circle().strokeBorder(Theme.strokeStrong))
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.and.arrow.up")
-                    Text("Export")
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.background)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(Theme.accent))
+                .disabled(viewModel.isExporting || viewModel.isLoading)
             }
-            .disabled(viewModel.isExporting || viewModel.isLoading)
         }
     }
 
-    /// Fetches all remaining pages first, then generates the file and
-    /// opens the share sheet.
-    private func export(kind: ExportKind) async {
+    /// Fetches all remaining pages first, then generates the file in the
+    /// selected format and opens the share sheet.
+    private func export(format: ExportFormat) async {
         Haptics.tap()
         await viewModel.fetchAllPages()
 
@@ -262,19 +319,21 @@ struct SearchView: View {
         guard !rows.isEmpty else { return }
 
         let content: String
-        let ext: String
-        switch kind {
+        switch format {
         case .csv:
             content = PasswordExporter.csv(from: rows)
-            ext = "csv"
-        case .passwordList:
+        case .txt:
             content = PasswordExporter.passwordList(from: rows)
-            ext = "txt"
+        case .json:
+            content = PasswordExporter.json(from: rows)
         }
 
         guard let url = PasswordExporter.write(
             content,
-            fileName: PasswordExporter.fileName(term: viewModel.searchTerm, extension: ext)
+            fileName: PasswordExporter.fileName(
+                term: viewModel.searchTerm,
+                extension: format.fileExtension
+            )
         ) else { return }
 
         Haptics.soft()

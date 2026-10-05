@@ -104,6 +104,28 @@ enum PasswordExporter {
         return unique
     }
 
+    /// Pretty-printed JSON array of credential objects, duplicates removed.
+    static func json(from allRows: [CredentialRow]) -> String {
+        let rows = deduplicated(allRows)
+        let payload: [[String: Any]] = rows.map { row in
+            var dict: [String: Any] = [
+                "source": row.source,
+                "identifier": row.identifier,
+                "password": row.password
+            ]
+            if let username = row.username { dict["username"] = username }
+            if let domain = row.domain { dict["domain"] = domain }
+            if let date = row.date { dict["captured"] = jsonDateFormatter.string(from: date) }
+            return dict
+        }
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return text
+    }
+
     /// Unique passwords, most frequent first — used for clipboard copying.
     static func uniquePasswords(from rows: [CredentialRow]) -> [String] {
         var counts: [String: Int] = [:]
@@ -139,6 +161,8 @@ enum PasswordExporter {
     }
 
     // MARK: - Private
+
+    private static let jsonDateFormatter = ISO8601DateFormatter()
 
     private static let fileStampFormatter: DateFormatter = {
         let f = DateFormatter()
