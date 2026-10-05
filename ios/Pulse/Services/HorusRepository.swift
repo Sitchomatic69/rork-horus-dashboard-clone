@@ -21,15 +21,6 @@ protocol HorusRepository {
         cursor: String?
     ) async throws -> HorusSearchResponse
 
-    /// Browse stealer logs without a keyword (recent feed).
-    func browseStealerLogs(
-        limit: Int,
-        cursor: String?,
-        field: HorusField?,
-        dateFrom: Date?,
-        dateTo: Date?
-    ) async throws -> HorusSearchResponse
-
     /// Check API key health via the stealer search endpoint with a minimal query.
     func checkHealth() async throws -> Bool
 }
@@ -61,38 +52,6 @@ final class LiveHorusRepository: HorusRepository {
         let clampedLimit = min(max(limit, 1), 500)
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "keyword", value: keyword),
-            URLQueryItem(name: "limit", value: "\(clampedLimit)"),
-        ]
-        if let fieldValue = field?.apiValue {
-            queryItems.append(URLQueryItem(name: "field", value: fieldValue))
-        }
-        if let from = dateFrom {
-            queryItems.append(URLQueryItem(name: "dateFrom", value: Self.isoFormatter.string(from: from)))
-        }
-        if let to = dateTo {
-            queryItems.append(URLQueryItem(name: "dateTo", value: Self.isoFormatter.string(from: to)))
-        }
-        if let cursor {
-            queryItems.append(URLQueryItem(name: "cursor", value: cursor))
-        }
-
-        return try await horusRequest(path: "/v1/search/stealer", queryItems: queryItems, key: key)
-    }
-
-    // MARK: - Browse stealer logs
-
-    func browseStealerLogs(
-        limit: Int,
-        cursor: String?,
-        field: HorusField?,
-        dateFrom: Date?,
-        dateTo: Date?
-    ) async throws -> HorusSearchResponse {
-        guard let key = apiKeyManager.horusKey else {
-            throw RepositoryError.missingKey
-        }
-        let clampedLimit = min(max(limit, 1), 500)
-        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: "\(clampedLimit)"),
         ]
         if let fieldValue = field?.apiValue {
@@ -171,23 +130,26 @@ final class LiveHorusRepository: HorusRepository {
             throw RepositoryError.invalidResponse
         }
         if http.statusCode == 401 || http.statusCode == 403 {
-            let err = parseHorusError(data)
+            let err = parseHorusError(data, status: http.statusCode)
             throw err ?? RepositoryError.unauthorized
         }
         if http.statusCode == 429 {
             throw RepositoryError.rateLimited
         }
         if http.statusCode == 400 {
-            let err = parseHorusError(data)
+            let err = parseHorusError(data, status: 400)
             throw err ?? RepositoryError.httpError(400, "Bad request — check parameters")
         }
         guard http.statusCode == 200 else {
-            let err = parseHorusError(data)
+            let err = parseHorusError(data, status: http.statusCode)
             throw err ?? RepositoryError.httpError(http.statusCode, nil)
         }
     }
 
-    private func parseHorusError(_ data: Data) -> RepositoryError? {
+    /// Parses Horus error envelopes. 401/403 map to key-rejected errors;
+    /// anything else surfaces the API's own message as an HTTP error so
+    /// parameter problems don't masquerade as auth failures.
+    private func parseHorusError(_ data: Data, status: Int = 0) -> RepositoryError? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let success = json["success"] as? Bool, !success,
               let errorDict = json["error"] as? [String: Any],
@@ -195,7 +157,10 @@ final class LiveHorusRepository: HorusRepository {
         else { return nil }
         let code = errorDict["code"] as? String
         let detail = code.map { "\(message) (code: \($0))" } ?? message
-        return .unauthorizedDetail(detail)
+        if status == 401 || status == 403 {
+            return .unauthorizedDetail(detail)
+        }
+        return .httpError(status, detail)
     }
 
     private func parseStealerResponse(_ data: Data) throws -> HorusSearchResponse {
@@ -206,8 +171,13 @@ final class LiveHorusRepository: HorusRepository {
             let err = parseHorusError(data)
             throw err ?? RepositoryError.parseError("API returned unsuccessful response")
         }
-        let items = dataDict["items"] as? [[String: Any]] ?? []
-        let total = dataDict["total"] as? Int ?? items.count
+        // The live API returns "results"/"totalHits"; older docs used "items"/"total".
+        let items = dataDict["results"] as? [[String: Any]]
+            ?? dataDict["items"] as? [[String: Any]]
+            ?? []
+        let total = dataDict["totalHits"] as? Int
+            ?? dataDict["total"] as? Int
+            ?? items.count
         let cursor = dataDict["nextCursor"] as? String ?? dataDict["next_cursor"] as? String
         let hasMore = cursor != nil && !items.isEmpty
 
@@ -275,37 +245,6 @@ final class MockHorusRepository: HorusRepository {
             ($0.username ?? "").localizedCaseInsensitiveContains(keyword)
         }
         return HorusSearchResponse(results: filtered, total: filtered.count, cursor: nil, hasMore: false)
-    }
-
-    func browseStealerLogs(
-        limit: Int,
-        cursor: String?,
-        field: HorusField?,
-        dateFrom: Date?,
-        dateTo: Date?
-    ) async throws -> HorusSearchResponse {
-        try await Task.sleep(for: .milliseconds(600))
-        let domains = ["portal.corp.com", "mail.agency.io", "cloud.saas.app", "admin.panel.dev", "api.service.net"]
-        let usernames = ["admin", "user1", "sa", "root", "deploy"]
-        let osList = ["Windows 11", "Windows 10", "macOS 14", "Ubuntu 22.04", "Windows 11"]
-        let countryList = ["US", "GB", "DE", "FR", "BR"]
-        let malwareList = ["RedLine", "Lumma", "Vidar", "Raccoon", "RedLine"]
-        let count = min(limit, 8)
-        var results: [StealerLogResult] = []
-        for i in 0..<count {
-            let log = StealerLogResult(
-                id: "hb\(i)",
-                logId: "log_\(1000 + i)",
-                domain: domains[i % 5],
-                username: usernames[i % 5],
-                os: osList[i % 5],
-                country: countryList[i % 5],
-                malwareFamily: malwareList[i % 5],
-                capturedAt: Date().addingTimeInterval(-86400 * Double(i + 1))
-            )
-            results.append(log)
-        }
-        return HorusSearchResponse(results: results, total: results.count, cursor: nil, hasMore: false)
     }
 
     func checkHealth() async throws -> Bool {

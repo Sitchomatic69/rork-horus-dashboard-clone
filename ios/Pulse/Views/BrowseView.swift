@@ -43,7 +43,7 @@ struct BrowseView: View {
             Text("Browse")
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .foregroundStyle(Theme.textPrimary)
-            Text("Recent stealer logs across monitored sources")
+            Text("Live stealer log feed across popular domains")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.textSecondary)
         }
@@ -70,7 +70,7 @@ struct BrowseView: View {
                         FilterChip(
                             title: field.rawValue,
                             isSelected: viewModel.fieldFilter == field,
-                            action: { viewModel.selectField(field) }
+                            action: { Task { await viewModel.selectField(field) } }
                         )
                     }
                 }
