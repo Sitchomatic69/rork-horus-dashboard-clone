@@ -23,6 +23,7 @@ final class SearchViewModel {
     private(set) var totalDog = 0
     private(set) var totalHorus = 0
     private(set) var totalDeHashed = 0
+    private(set) var isExporting = false
 
     var searchTerm = ""
     var selectedType: SearchType = .email
@@ -98,9 +99,30 @@ final class SearchViewModel {
         isLoading = false
     }
 
+    /// Fetches every remaining page from all three sources so an export
+    /// contains the complete result set, not just the loaded pages.
+    /// Calls with no more pages simply return quickly.
+    func fetchAllPages() async {
+        guard !isExporting, !isLoading else { return }
+        isExporting = true
+        defer { isExporting = false }
+
+        let term = searchTerm.trimmingCharacters(in: .whitespaces)
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.drainDog(term: term) }
+            group.addTask { await self.drainHorus(term: term) }
+            group.addTask { await self.drainDeHashed(term: term) }
+        }
+    }
+
     // MARK: - Private
 
-    private func fetchDog(term: String, append: Bool = false) async {
+    /// Page cap per source as a safety net against APIs that never
+    /// clear their `hasMore` flag.
+    private static let maxDrainPages = 100
+
+    @discardableResult
+    private func fetchDog(term: String, append: Bool = false) async -> Bool {
         do {
             let response = try await dogRepo.search(term: term, type: selectedType, page: currentDogPage)
             if append {
@@ -112,10 +134,13 @@ final class SearchViewModel {
             totalDog = response.total
         } catch {
             self.error = error.localizedDescription
+            return false
         }
+        return true
     }
 
-    private func fetchHorus(keyword: String, append: Bool = false) async {
+    @discardableResult
+    private func fetchHorus(keyword: String, append: Bool = false) async -> Bool {
         do {
             let response = try await horusRepo.searchStealer(
                 keyword: keyword,
@@ -135,10 +160,13 @@ final class SearchViewModel {
             totalHorus = response.total
         } catch {
             if self.error == nil { self.error = error.localizedDescription }
+            return false
         }
+        return true
     }
 
-    private func fetchDeHashed(term: String, append: Bool = false) async {
+    @discardableResult
+    private func fetchDeHashed(term: String, append: Bool = false) async -> Bool {
         do {
             let response = try await dehashedRepo.search(
                 term: term,
@@ -154,8 +182,37 @@ final class SearchViewModel {
             totalDeHashed = response.total
         } catch RepositoryError.missingKey {
             // No key configured — skip silently; the Dashboard shows setup state.
+            return false
         } catch {
             if self.error == nil { self.error = error.localizedDescription }
+            return false
+        }
+        return true
+    }
+
+    private func drainDog(term: String) async {
+        var page = 0
+        while hasMoreDog && page < Self.maxDrainPages {
+            page += 1
+            currentDogPage += 1
+            guard await fetchDog(term: term, append: true) else { break }
+        }
+    }
+
+    private func drainHorus(term: String) async {
+        var page = 0
+        while hasMoreHorus && page < Self.maxDrainPages {
+            page += 1
+            guard await fetchHorus(keyword: term, append: true) else { break }
+        }
+    }
+
+    private func drainDeHashed(term: String) async {
+        var page = 0
+        while hasMoreDehashed && page < Self.maxDrainPages {
+            page += 1
+            currentDeHashedPage += 1
+            guard await fetchDeHashed(term: term, append: true) else { break }
         }
     }
 }

@@ -8,10 +8,13 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct SearchView: View {
     let apiKeyManager: ApiKeyManager
     @State private var viewModel: SearchViewModel
+    @State private var shareItem: ShareItem?
+    @State private var copiedCount: Int?
 
     init(apiKeyManager: ApiKeyManager) {
         self.apiKeyManager = apiKeyManager
@@ -32,6 +35,9 @@ struct SearchView: View {
             } else {
                 emptyState
             }
+        }
+        .sheet(item: $shareItem) { item in
+            ShareSheet(items: [item.url])
         }
     }
 
@@ -83,6 +89,7 @@ struct SearchView: View {
 
     private var resultsSection: some View {
         VStack(alignment: .leading, spacing: 18) {
+            exportBar
             if !viewModel.breachResults.isEmpty {
                 resultsGroup(
                     title: "Breach Records — OSINTDog",
@@ -166,6 +173,127 @@ struct SearchView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Export
+
+    private enum ExportKind {
+        case csv
+        case passwordList
+    }
+
+    private struct ShareItem: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
+    /// Number of password-bearing credentials currently loaded.
+    private var loadedCredentialCount: Int {
+        PasswordExporter.collect(
+            breaches: viewModel.breachResults,
+            dehashed: viewModel.dehashedResults,
+            stealer: viewModel.stealerResults
+        ).count
+    }
+
+    private var exportBar: some View {
+        HStack(spacing: 12) {
+            if viewModel.isExporting {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(Theme.accent)
+                        .controlSize(.small)
+                    Text("Fetching all pages…")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            } else if let copied = copiedCount {
+                Label("\(copied) passwords copied", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.positive)
+            } else {
+                Text("\(loadedCredentialCount) credentials")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+
+            Spacer()
+
+            Menu {
+                Button { Task { await export(kind: .csv) } } label: {
+                    Label("Full credentials (.csv)", systemImage: "tablecells")
+                }
+                Button { Task { await export(kind: .passwordList) } } label: {
+                    Label("Complete password list (.txt)", systemImage: "doc.plaintext")
+                }
+                Divider()
+                Button { copyPasswords() } label: {
+                    Label("Copy all passwords", systemImage: "doc.on.doc")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Export")
+                }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.background)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Theme.accent))
+            }
+            .disabled(viewModel.isExporting || viewModel.isLoading)
+        }
+    }
+
+    /// Fetches all remaining pages first, then generates the file and
+    /// opens the share sheet.
+    private func export(kind: ExportKind) async {
+        Haptics.tap()
+        await viewModel.fetchAllPages()
+
+        let rows = PasswordExporter.collect(
+            breaches: viewModel.breachResults,
+            dehashed: viewModel.dehashedResults,
+            stealer: viewModel.stealerResults
+        )
+        guard !rows.isEmpty else { return }
+
+        let content: String
+        let ext: String
+        switch kind {
+        case .csv:
+            content = PasswordExporter.csv(from: rows)
+            ext = "csv"
+        case .passwordList:
+            content = PasswordExporter.passwordList(from: rows)
+            ext = "txt"
+        }
+
+        guard let url = PasswordExporter.write(
+            content,
+            fileName: PasswordExporter.fileName(term: viewModel.searchTerm, extension: ext)
+        ) else { return }
+
+        Haptics.soft()
+        shareItem = ShareItem(url: url)
+    }
+
+    private func copyPasswords() {
+        let rows = PasswordExporter.collect(
+            breaches: viewModel.breachResults,
+            dehashed: viewModel.dehashedResults,
+            stealer: viewModel.stealerResults
+        )
+        let passwords = PasswordExporter.uniquePasswords(from: rows)
+        guard !passwords.isEmpty else { return }
+
+        UIPasteboard.general.string = passwords.joined(separator: "\n")
+        Haptics.soft()
+        copiedCount = passwords.count
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            copiedCount = nil
         }
     }
 
