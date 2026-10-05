@@ -222,8 +222,11 @@ final class LiveHorusRepository: HorusRepository {
             let country = dict["country"] as? String ?? dict["country_code"] as? String
             let ip = dict["ip"] as? String ?? dict["ip_address"] as? String
             let malware = dict["malware_family"] as? String ?? dict["malware"] as? String
-            let dateStr = dict["captured_at"] as? String
-            let capturedAt = dateStr.flatMap { Self.dateFormatter.date(from: $0) }
+            // The live API stamps records with "ingested_at"; older docs
+            // and the mock use "captured_at". Accept both.
+            let capturedAt = DateParser.parse(dict["ingested_at"] as? String)
+                ?? DateParser.parse(dict["captured_at"] as? String)
+                ?? DateParser.parse(dict["local_time"] as? String)
             return StealerLogResult(id: id, logId: logId, domain: domain, url: url,
                                     username: username, password: password, os: os,
                                     country: country, ip: ip, malwareFamily: malware,
@@ -231,12 +234,6 @@ final class LiveHorusRepository: HorusRepository {
         }
         return HorusSearchResponse(results: results, total: total, cursor: cursor, hasMore: hasMore)
     }
-
-    private static let dateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()

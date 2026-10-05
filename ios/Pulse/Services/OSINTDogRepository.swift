@@ -328,8 +328,9 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
                 let password = dict["password"] as? String
                 let domain = dict["domain"] as? String
                 let ip = dict["ip"] as? String
-                let dateStr = dict["date"] as? String
-                let date = dateStr.flatMap { Self.dateFormatter.date(from: $0) }
+                let date = DateParser.parse(dict["date"] as? String)
+                    ?? DateParser.parse(dict["breach_date"] as? String)
+                    ?? DateParser.parse(dict["added"] as? String)
                 var fields = dict.compactMapValues { $0 as? String }
                 for key in ["id", "email", "username", "password", "domain", "ip", "date"] {
                     fields.removeValue(forKey: key)
@@ -342,12 +343,6 @@ final class LiveOSINTDogRepository: OSINTDogRepository {
         let hasMore = false
         return OSINTDogSearchResponse(results: results, total: total, page: page, hasMore: hasMore)
     }
-
-    private static let dateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 }
 
 // MARK: - Mock

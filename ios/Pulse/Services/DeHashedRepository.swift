@@ -179,6 +179,16 @@ final class LiveDeHashedRepository: DeHashedRepository {
             }
         }
 
+        // v2 entries don't guarantee a timestamp — use one when the API
+        // provides it, otherwise stamp the retrieval time so every card
+        // can show a date and time.
+        let date = DateParser.parse(
+            firstValue(entry, "found_date")
+                ?? firstValue(entry, "date")
+                ?? firstValue(entry, "added")
+                ?? firstValue(entry, "modified")
+        ) ?? Date()
+
         return BreachResult(
             id: id,
             source: source,
@@ -187,7 +197,7 @@ final class LiveDeHashedRepository: DeHashedRepository {
             password: password,
             domain: domain,
             ip: ip,
-            date: nil,
+            date: date,
             fields: fields
         )
     }
@@ -263,7 +273,7 @@ final class MockDeHashedRepository: DeHashedRepository {
                 password: "hunter2",
                 domain: "example.com",
                 ip: "203.0.113.7",
-                date: nil,
+                date: Date().addingTimeInterval(-86400 * 5),
                 fields: ["name": "Jane Doe", "phone": "+15550100"]
             ),
             BreachResult(
@@ -274,7 +284,7 @@ final class MockDeHashedRepository: DeHashedRepository {
                 password: nil,
                 domain: "example.org",
                 ip: "198.51.100.22",
-                date: nil,
+                date: Date().addingTimeInterval(-86400 * 12),
                 fields: ["company": "Example LLC"]
             ),
         ]

@@ -50,9 +50,11 @@ struct BreachResultCard: View {
                 SourceBadge(name: result.source)
                 Spacer()
                 if let date = result.date {
-                    Text(date, format: .relative(presentation: .named))
+                    Label(date.formatted(.dateTime.day().month().year().hour().minute()),
+                          systemImage: "clock")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
                 }
             }
 
@@ -127,9 +129,11 @@ struct StealerResultCard: View {
                 }
                 Spacer()
                 if let date = log.capturedAt {
-                    Text(date, format: .relative(presentation: .named))
+                    Label(date.formatted(.dateTime.day().month().year().hour().minute()),
+                          systemImage: "clock")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
                 }
             }
 
